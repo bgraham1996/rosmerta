@@ -1,0 +1,17 @@
+[project]
+name = "rosmerta"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "argparse>=1.4.0",
+    "click>=8.3.1",
+    "ib-insync>=0.9.86",
+    "matplotlib>=3.10.8",
+    "nest-asyncio>=1.6.0",
+    "numpy>=2.4.2",
+    "pandas>=3.0.1",
+    "rich>=14.3.3",
+    "seaborn>=0.13.2",
+]
