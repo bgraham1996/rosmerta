@@ -11,8 +11,8 @@ CREATE TABLE stocks (
   ib_con_id INTEGER,
   country VARCHAR(3),
   is_active BOOLEAN DEFAULT TRUE,
-  created_at TIMESTAMPZ DEFAULT NOW(),
-  updated_at TIMESTAMPZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
 
   CONSTRAINT uq_symbol_exchange UNIQUE (symbol, exchange)
 );
@@ -23,7 +23,7 @@ CREATE INDEX idx_stocks_country on stocks (country);
 
 CREATE TABLE price_hourly (
   stock_id INTEGER NOT NULL REFERENCES stocks(stock_id),
-  timestamp TIMESTAMPZ NOT NULL,
+  timestamp TIMESTAMPTZ NOT NULL,
   open NUMERIC(12,4) NOT NULL,
   high NUMERIC(12,4) NOT NULL,
   low  NUMERIC(12,4) NOT NULL,
