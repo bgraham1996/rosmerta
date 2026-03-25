@@ -835,13 +835,8 @@ def fetch_fundamentals(ticker, start_date=None, end_date=None,
 # =============================================================
 if __name__ == "__main__":
     # PostgreSQL on the Ubuntu server
-    DB_CONFIG = {
-        'host': '10.0.0.1',
-        'port': 5432,
-        'dbname': 'stocks',
-        'user': 'stock_user',
-        'password': 'changeme',  # update this!
-    }
+    from db_config import get_db_config
+    DB_CONFIG = get_db_config()
 
     # SEC requires User-Agent — set via env:
     #   export EDGAR_USER_AGENT="Your Name your@email.com"

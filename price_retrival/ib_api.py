@@ -389,13 +389,8 @@ if __name__ == "__main__":
     IB_PORT = 4001          # Gateway paper trading
 
     # PostgreSQL on the Ubuntu server
-    DB_CONFIG = {
-        'host': '127.0.0.1',   # localhost if running on the server
-        'port': 5432,
-        'dbname': 'stocks',
-        'user': 'stock_user',
-        'password': 'changeme',  # update this!
-    }
+    from db_config import get_db_config
+    DB_CONFIG = get_db_config()
 
     # -- Fetch and store --
     with IBStockDataFetcher(host=IB_HOST, port=IB_PORT,

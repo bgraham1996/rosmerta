@@ -7,25 +7,16 @@ from rich.console import Console
 from rich.table import Table
 import os
 from dotenv import load_dotenv
+from db_config import get_db_config
+
 
 load_dotenv()
-postgres_password = os.getenv('postgres_password')
 email = os.getenv('email')
+
+
 
 console = Console()
 
-
-# Shared DB config — used by both fetch subcommands
-def get_db_config(no_db=False):
-    if no_db:
-        return None
-    return {
-        'host': '10.0.0.1',
-        'port': 5432,
-        'dbname': 'stocks',
-        'user': 'stock_user',
-        'password': postgres_password,
-    }
 
 
 @click.group()
