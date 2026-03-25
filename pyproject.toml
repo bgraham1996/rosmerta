@@ -7,6 +7,7 @@ requires-python = ">=3.13"
 dependencies = [
     "argparse>=1.4.0",
     "click>=8.3.1",
+    "dataclasses>=0.8",
     "dotenv>=0.9.9",
     "ib-insync>=0.9.86",
     "matplotlib>=3.10.8",
