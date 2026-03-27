@@ -418,26 +418,47 @@ class EdgarFundamentalsFetcher:
         # Try us-gaap first, then dei (for shares outstanding)
         taxonomies_to_try = ['us-gaap', 'dei']
 
-        all_facts = []
+        # Collect facts from ALL matching tags, not just the first one.
+        # Companies sometimes switch XBRL tags mid-history (e.g. LLY
+        # switched from ResearchAndDevelopmentExpense to
+        # ResearchAndDevelopmentExpenseExcludingAcquiredInProcessCost
+        # in Q3 2023). We merge data from all tags, with earlier tags
+        # in the priority list winning when there's overlap for a period.
+        merged_result = {}
+
         for taxonomy in taxonomies_to_try:
             tax_facts = company_facts.get('facts', {}).get(taxonomy, {})
             for tag in xbrl_tags:
                 tag_data = tax_facts.get(tag, {})
-                # Units could be 'USD', 'USD/shares', 'shares', 'pure'
+                tag_facts = []
                 for unit_key, unit_facts in tag_data.get('units', {}).items():
-                    all_facts.extend(unit_facts)
+                    tag_facts.extend(unit_facts)
 
-                if all_facts:
-                    break  # Found data for this priority tag
-            if all_facts:
-                break  # Found data in this taxonomy
+                if not tag_facts:
+                    continue
 
-        if not all_facts:
-            return {}
+                # Process this tag's facts through the standard pipeline
+                tag_result = self._deduplicate_facts(
+                    tag_facts, is_instant, start_date, end_date
+                )
 
+                # Merge: only add periods not already covered by a
+                # higher-priority tag
+                for key, value in tag_result.items():
+                    if key not in merged_result:
+                        merged_result[key] = value
+
+        return merged_result
+
+    def _deduplicate_facts(self, facts, is_instant, start_date, end_date):
+        """
+        Filter, classify, and deduplicate a list of XBRL facts.
+
+        Returns a dict: {(period_end_str, period_type): value}
+        """
         # Filter to 10-K and 10-Q filings only (most reliable)
         valid_forms = {'10-K', '10-K/A', '10-Q', '10-Q/A'}
-        filtered = [f for f in all_facts if f.get('form') in valid_forms]
+        filtered = [f for f in facts if f.get('form') in valid_forms]
 
         # Deduplicate: for each unique period, keep the most recently
         # filed value. EDGAR returns duplicates because the same figure
@@ -468,20 +489,31 @@ class EdgarFundamentalsFetcher:
                 # For balance sheet items, determine period from filing form
                 period_type = 'FY' if '10-K' in form else 'QR'
             else:
-                # For duration facts, calculate approximate quarter
-                if start:
-                    try:
-                        start_dt = datetime.strptime(start, '%Y-%m-%d').date()
-                        duration_days = (pe_date - start_dt).days
-                    except (ValueError, TypeError):
-                        duration_days = 0
+                # For duration facts, classify by period length.
+                # EDGAR returns three kinds of duration facts:
+                #   ~60-115 days  → true single quarter (Q1/Q2/Q3)
+                #   ~150-290 days → cumulative YTD (Q1+Q2, Q1+Q2+Q3, etc.)
+                #   ~300-380 days → full fiscal year (FY)
+                # We only want single-quarter and FY; skip YTD cumulative.
+                # Duration facts MUST have a start date; skip if missing
+                # (these are metadata/instant entries that don't represent
+                # actual financial period data).
+                if not start:
+                    continue
 
-                    if duration_days > 300:
-                        period_type = 'FY'
-                    else:
-                        period_type = 'QR'  # quarterly
+                try:
+                    start_dt = datetime.strptime(start, '%Y-%m-%d').date()
+                    duration_days = (pe_date - start_dt).days
+                except (ValueError, TypeError):
+                    continue
+
+                if duration_days > 300:
+                    period_type = 'FY'
+                elif duration_days <= 115:
+                    period_type = 'QR'  # true single quarter
                 else:
-                    period_type = 'FY' if '10-K' in form else 'QR'
+                    # Cumulative YTD (e.g. 6-month or 9-month) — skip
+                    continue
 
             # Deduplicate: keep the fact with the latest filing date
             key = (period_end, period_type)
@@ -503,10 +535,45 @@ class EdgarFundamentalsFetcher:
             if entry['value'] is not None
         }
 
-    def _determine_fiscal_quarter(self, period_end_str, period_type):
+    def _detect_fy_end_month(self, all_periods):
         """
-        Determine the fiscal quarter label (Q1-Q4 or FY) from the
-        period end date. Uses calendar quarter as approximation.
+        Detect the company's fiscal year end month from the FY records.
+
+        Looks at all periods classified as FY and finds the most common
+        ending month. Returns 12 (December) as default if no FY records
+        are found.
+        """
+        fy_months = []
+        for period_end_str, period_type in all_periods:
+            if period_type == 'FY':
+                try:
+                    pe = datetime.strptime(period_end_str, '%Y-%m-%d').date()
+                    fy_months.append(pe.month)
+                except (ValueError, TypeError):
+                    continue
+
+        if not fy_months:
+            return 12  # default to calendar year
+
+        # Return the most common FY end month
+        from collections import Counter
+        return Counter(fy_months).most_common(1)[0][0]
+
+    def _determine_fiscal_quarter(self, period_end_str, period_type,
+                                   fy_end_month=12):
+        """
+        Determine the fiscal quarter label and fiscal year from the
+        period end date, relative to the company's fiscal year end month.
+
+        For a company with FY ending in month M:
+          Q1 ends ~3 months after FY end  (M+3)
+          Q2 ends ~6 months after FY end  (M+6)
+          Q3 ends ~9 months after FY end  (M+9)
+          Q4 ends at FY end               (M)
+
+        Examples:
+          Calendar FY (Dec): Q1=Mar, Q2=Jun, Q3=Sep, Q4=Dec
+          Apple FY (Sep):    Q1=Dec, Q2=Mar, Q3=Jun, Q4=Sep
 
         Returns: ('Q1'|'Q2'|'Q3'|'Q4'|'FY', fiscal_year)
         """
@@ -515,21 +582,167 @@ class EdgarFundamentalsFetcher:
         except (ValueError, TypeError):
             return None, None
 
-        fiscal_year = pe.year
-
         if period_type == 'FY':
-            return 'FY', fiscal_year
+            return 'FY', pe.year
 
-        # Map calendar month to approximate quarter
         month = pe.month
-        if month <= 3:
-            return 'Q1', fiscal_year
-        elif month <= 6:
-            return 'Q2', fiscal_year
-        elif month <= 9:
-            return 'Q3', fiscal_year
+
+        # Calculate how many months past the FY end this period falls.
+        # months_past_fy_end == 0 means same month as FY end (i.e. Q4).
+        months_past_fy_end = (month - fy_end_month) % 12
+
+        # Map to fiscal quarter:
+        #   1-3 months after FY end → Q1
+        #   4-6 months after FY end → Q2
+        #   7-9 months after FY end → Q3
+        #   10-12 (or 0) months after FY end → Q4
+        if months_past_fy_end == 0:
+            # Same month as FY end — this is Q4
+            # But if it's also tagged as QR (not FY), it's a true Q4
+            quarter = 'Q4'
+        elif months_past_fy_end <= 3:
+            quarter = 'Q1'
+        elif months_past_fy_end <= 6:
+            quarter = 'Q2'
+        elif months_past_fy_end <= 9:
+            quarter = 'Q3'
         else:
-            return 'Q4', fiscal_year
+            quarter = 'Q4'
+
+        # Determine fiscal year: for non-calendar FY companies,
+        # quarters after the FY end month belong to the NEXT fiscal year.
+        # e.g. Apple FY ends Sep 2024, so Oct-Dec 2024 is FY2025 Q1.
+        if fy_end_month != 12 and month > fy_end_month:
+            fiscal_year = pe.year + 1
+        else:
+            fiscal_year = pe.year
+
+        return quarter, fiscal_year
+
+    # ---------------------------------------------------------
+    # Q4 Derivation
+    # ---------------------------------------------------------
+    # Fields where Q4 = FY - (Q1 + Q2 + Q3)
+    DURATION_FIELDS = [
+        'revenue', 'cost_of_revenue', 'gross_profit',
+        'operating_expenses', 'operating_income', 'net_income',
+        'research_and_development', 'sga_expense',
+        'operating_cash_flow', 'capex', 'free_cash_flow',
+    ]
+
+    # Fields where Q4 value = FY value (point-in-time snapshots)
+    INSTANT_FIELDS = [
+        'total_assets', 'total_liabilities', 'total_equity',
+        'cash_and_equivalents', 'total_debt', 'shares_outstanding',
+    ]
+
+    def _derive_q4_records(self, records):
+        """
+        Derive Q4 records from FY - (Q1 + Q2 + Q3) for each fiscal year.
+
+        Many companies don't file a separate 10-Q for Q4 — they go
+        straight to the 10-K. This means quarterly XBRL data has Q1-Q3
+        but Q4 is missing. We can derive it by subtraction.
+
+        For duration fields (income statement, cash flow):
+            Q4 = FY - (Q1 + Q2 + Q3)
+        For instant fields (balance sheet):
+            Q4 = FY snapshot (same point in time)
+        For EPS:
+            Derived from Q4 net income / Q4 shares outstanding
+        """
+        # Group records by fiscal year
+        by_year = {}
+        for r in records:
+            fy = r['fiscal_year']
+            pt = r['period_type']
+            by_year.setdefault(fy, {})[pt] = r
+
+        derived = []
+        for fy, periods in by_year.items():
+            # Only derive if we have FY and Q4 is missing or empty
+            if 'FY' not in periods:
+                continue
+
+            if 'Q4' in periods:
+                # Check if the existing Q4 has any duration data populated.
+                # If it's all None (e.g. only balance sheet instant facts
+                # from a 10-K with the same period_end), treat it as empty
+                # and derive the duration fields.
+                existing_q4 = periods['Q4']
+                has_duration_data = any(
+                    existing_q4.get(f) is not None
+                    for f in self.DURATION_FIELDS
+                )
+                if has_duration_data:
+                    continue  # Q4 already has real data, skip derivation
+
+            # Need at least Q1-Q3 to derive Q4
+            quarters_present = [q for q in ('Q1', 'Q2', 'Q3') if q in periods]
+            if len(quarters_present) < 3:
+                self.logger.debug(
+                    f"FY {fy}: cannot derive Q4 — only have "
+                    f"{quarters_present} (need Q1, Q2, Q3)"
+                )
+                continue
+
+            fy_rec = periods['FY']
+            q1, q2, q3 = periods['Q1'], periods['Q2'], periods['Q3']
+
+            q4 = {
+                'period_end': fy_rec['period_end'],  # Q4 ends same day as FY
+                'period_type': 'Q4',
+                'fiscal_year': fy,
+            }
+
+            # Duration fields: Q4 = FY - (Q1 + Q2 + Q3)
+            for field in self.DURATION_FIELDS:
+                fy_val = fy_rec.get(field)
+                q1_val = q1.get(field)
+                q2_val = q2.get(field)
+                q3_val = q3.get(field)
+
+                if all(v is not None for v in (fy_val, q1_val, q2_val, q3_val)):
+                    q4[field] = fy_val - (q1_val + q2_val + q3_val)
+                else:
+                    q4[field] = None
+
+            # Instant fields: copy from FY (same point-in-time snapshot)
+            for field in self.INSTANT_FIELDS:
+                q4[field] = fy_rec.get(field)
+
+            # EPS: derive from Q4 net income / shares rather than
+            # subtracting per-share figures (which don't subtract cleanly
+            # due to share count changes across quarters)
+            q4_ni = q4.get('net_income')
+            q4_shares = q4.get('shares_outstanding')
+            if q4_ni is not None and q4_shares and q4_shares != 0:
+                q4['eps_basic'] = round(q4_ni / q4_shares, 4)
+                q4['eps_diluted'] = round(q4_ni / q4_shares, 4)
+            else:
+                # Fall back to subtraction if we can't compute from shares
+                for eps_field in ('eps_basic', 'eps_diluted'):
+                    fy_val = fy_rec.get(eps_field)
+                    q1_val = q1.get(eps_field)
+                    q2_val = q2.get(eps_field)
+                    q3_val = q3.get(eps_field)
+                    if all(v is not None for v in (fy_val, q1_val, q2_val, q3_val)):
+                        q4[eps_field] = round(
+                            fy_val - (q1_val + q2_val + q3_val), 4
+                        )
+                    else:
+                        q4[eps_field] = None
+
+            # Compute ratios on the derived Q4 record
+            q4.update(self._compute_ratios(q4))
+
+            self.logger.info(
+                f"Derived Q4 {fy} from FY - (Q1+Q2+Q3) "
+                f"(period_end: {q4['period_end']})"
+            )
+            derived.append(q4)
+
+        return derived
 
     # ---------------------------------------------------------
     # Main Fetch Method
@@ -588,15 +801,58 @@ class EdgarFundamentalsFetcher:
         for field_data in extracted.values():
             all_periods.update(field_data.keys())
 
+        # Collect periods that have data from duration fields (income
+        # statement, cash flow). These are reliable because duration
+        # facts require a start date, which we enforce in
+        # _deduplicate_facts — so filing-date ghost entries can't
+        # sneak through. We use this to validate quarterly periods.
+        duration_columns = [
+            col for col in XBRL_TAG_MAP if col not in INSTANT_TAGS
+        ]
+        periods_with_duration_data = {
+            key for col in duration_columns
+            for key in extracted[col].keys()
+        }
+
+        # Filter: only keep periods that have at least one duration field
+        # populated. Duration facts require a start date (enforced in
+        # _deduplicate_facts), so filing-date ghost entries can't sneak
+        # through. This eliminates all ghost records regardless of whether
+        # they're QR or FY classified.
+        all_periods = {
+            (pe, pt) for pe, pt in all_periods
+            if (pe, pt) in periods_with_duration_data
+        }
+
+        # Also filter out QR records that share period_end with an FY
+        # record — these are balance-sheet-only artefacts from 10-K filings.
+        fy_period_ends = {
+            pe for pe, pt in all_periods if pt == 'FY'
+        }
+        all_periods = {
+            (pe, pt) for pe, pt in all_periods
+            if not (pt == 'QR' and pe in fy_period_ends)
+        }
+
         if not all_periods:
             self.logger.warning(f"No fundamental data found for {ticker} in date range")
             return None
 
+        # Detect the company's fiscal year end month
+        fy_end_month = self._detect_fy_end_month(all_periods)
+        if fy_end_month != 12:
+            self.logger.info(
+                f"{ticker} has non-calendar fiscal year "
+                f"(FY ends in month {fy_end_month})"
+            )
+
         # Build records: one dict per period
         records = []
+        data_fields = list(XBRL_TAG_MAP.keys())  # all mappable fields
+
         for period_end_str, raw_period_type in sorted(all_periods):
             period_type, fiscal_year = self._determine_fiscal_quarter(
-                period_end_str, raw_period_type
+                period_end_str, raw_period_type, fy_end_month
             )
             if not period_type:
                 continue
@@ -611,6 +867,12 @@ class EdgarFundamentalsFetcher:
             for db_column in XBRL_TAG_MAP:
                 key = (period_end_str, raw_period_type)
                 record[db_column] = extracted[db_column].get(key)
+
+            # Skip records where every data field is None — these are
+            # ghost entries from filing-date instant facts or other
+            # metadata that don't represent real financial periods.
+            if not any(record.get(f) is not None for f in data_fields):
+                continue
 
             # Compute free_cash_flow if not directly available
             if record.get('free_cash_flow') is None:
@@ -628,6 +890,22 @@ class EdgarFundamentalsFetcher:
             f"Extracted {len(records)} periods for {ticker} "
             f"({company_info['name']})"
         )
+
+        # Derive Q4 records where missing (FY - Q1 - Q2 - Q3)
+        derived_q4 = self._derive_q4_records(records)
+        if derived_q4:
+            # Remove any empty Q4 records that the derivation is replacing
+            derived_keys = {(r['fiscal_year'], r['period_type']) for r in derived_q4}
+            records = [
+                r for r in records
+                if (r['fiscal_year'], r['period_type']) not in derived_keys
+            ]
+            records.extend(derived_q4)
+            # Re-sort so Q4 sits in the right chronological position
+            records.sort(key=lambda r: (r['period_end'], r['period_type']))
+            self.logger.info(
+                f"Derived {len(derived_q4)} Q4 record(s) for {ticker}"
+            )
 
         # Save to DB
         if save_to_db and self.db_config:
