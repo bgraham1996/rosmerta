@@ -23,9 +23,6 @@ import psycopg2
 from psycopg2.extras import execute_values
 from datetime import datetime, date
 from pathlib import Path
-from dotenv import load_dotenv
-load_dotenv()
-email = os.getenv('email')
 
 
 # =============================================================
@@ -192,7 +189,7 @@ class EdgarFundamentalsFetcher:
     # Cache directory for CIK mapping file
     CACHE_DIR = Path.home() / '.stock_cli' / 'cache'
 
-    def __init__(self, db_config=None, user_agent=email):
+    def __init__(self, db_config=None, user_agent=None):
         """
         Args:
             db_config:   Dict with PostgreSQL connection params, e.g.:
