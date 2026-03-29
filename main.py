@@ -200,13 +200,22 @@ def bulk_price(list_name, start, end, exchange, delay, dry_run):
 @click.option('--end', '-e', default=None, help='End date (YYYY-MM-DD). Omit for up to present.')
 @click.option('--dry-run', is_flag=True, default=False,
               help='Show what would be fetched without fetching')
-def bulk_fundamentals(list_name, start, end, dry_run):
+@click.option('--force', is_flag=True, default=False,
+              help='Force re-fetch all tickers, ignoring freshness check')
+@click.option('--max-age', default=30, type=int,
+              help='Skip tickers fetched within this many days (default: 30)')
+def bulk_fundamentals(list_name, start, end, dry_run, force, max_age):
     """Fetch fundamental data from SEC EDGAR for all stocks in a watchlist.
+
+    Tickers with a successful fetch within --max-age days are skipped
+    unless --force is used.
 
     Example: rosmerta bulk fundamentals --list core
     Example: rosmerta bulk fundamentals --list core --start 2020-01-01 --end 2024-12-31
+    Example: rosmerta bulk fundamentals --list core --force
     """
-    _run_bulk_fetch(list_name, start, end, dry_run, 'fundamentals')
+    _run_bulk_fetch(list_name, start, end, dry_run, 'fundamentals',
+                    force=force, max_age_days=max_age)
 
 
 # ─── Shared bulk fetch logic ───────────────────────────────
@@ -261,6 +270,7 @@ def _show_results(results, list_name, record_label='Records'):
     succeeded = [r for r in results if r.status == 'success']
     failed = [r for r in results if r.status == 'error']
     empty = [r for r in results if r.status == 'empty']
+    skipped = [r for r in results if r.status == 'skipped']
 
     summary = Table(title=f"Bulk fetch complete — {list_name}")
     summary.add_column("Symbol", style="cyan")
@@ -272,6 +282,9 @@ def _show_results(results, list_name, record_label='Records'):
         if r.status == 'success':
             status_str = "[green]✓[/green]"
             count_str = f"{r.records:,}"
+        elif r.status == 'skipped':
+            status_str = "[blue]⊘[/blue]"
+            count_str = "—"
         elif r.status == 'empty':
             status_str = "[yellow]—[/yellow]"
             count_str = "0"
@@ -287,6 +300,7 @@ def _show_results(results, list_name, record_label='Records'):
     console.print(
         f"\n[bold]Summary:[/bold] "
         f"[green]{len(succeeded)} succeeded[/green], "
+        f"[blue]{len(skipped)} skipped[/blue], "
         f"[yellow]{len(empty)} empty[/yellow], "
         f"[red]{len(failed)} failed[/red] — "
         f"{total:,} total {record_label.lower()} fetched"
@@ -294,7 +308,7 @@ def _show_results(results, list_name, record_label='Records'):
 
 
 def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
-                    exchange='SMART', delay=2):
+                    exchange='SMART', delay=2, force=False, max_age_days=30):
     """Shared implementation for bulk price and bulk fundamentals commands."""
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
     from price_retrival.bulk_fetch import bulk_fetch_prices, bulk_fetch_fundamentals
@@ -354,12 +368,22 @@ def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
             )
             record_label = 'Bars'
         else:
+            if force:
+                console.print("[yellow]--force: re-fetching all tickers[/yellow]")
+            else:
+                console.print(
+                    f"[dim]Skipping tickers fetched within the last "
+                    f"{max_age_days} days (use --force to override)[/dim]"
+                )
+
             results = bulk_fetch_fundamentals(
                 tickers=tickers,
                 db_config=db_config,
                 user_agent=email,
                 start=start,
                 end=end,
+                max_age_days=max_age_days,
+                force=force,
                 on_ticker_start=on_start,
                 on_ticker_complete=on_complete,
             )
