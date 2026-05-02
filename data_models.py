@@ -57,7 +57,9 @@ class Asset:
                 self._prices_cache = resample_ohlcv(data, rule)
             else:
                 raise ValueError(f"None applicable timeframe aggregation applied to {self.asset_id}")
-        return self._prices_cache
+            return self._prices_cache
+        else:
+            return self._prices_cache
 
     def get_dates(self):
         if self._prices_cache is None:
@@ -224,7 +226,7 @@ class Market:
                 "select s.symbol "
                 "FROM watchlist_members wm "
                 "JOIN stocks s ON s.stock_id = wm.stock_id "
-                "WHERE wm.list = %s",
+                "WHERE wm.list_name = %s",
                 (self.stock_list,)
             )
             symbol_list = cur.fetchall()
@@ -250,26 +252,24 @@ class Market:
                 value.clear_price_cache()
         return True
 
-    def get_panel(self, field = 'close'):
+    def get_panel(self, conn, field = 'close'):
         cols = ['open', 'high', 'low', 'close', 'volume', 'avg_price']
         if field not in cols:
-            raise ValueError(f"Invalid field: {field} for makert object: {self.market_id}")
+            raise ValueError(f"Invalid field: {field} for market object: {self.market_id}")
         else:
-            if self._panels_cache['field'] is None:
-                dates = []
+            if self._panels_cache[field] is None:
+                dates = set()
+                for symbol in self.assets:
+                    dates.update(self.assets[symbol].get_dates())
+                panel = DataFrame({'timestamp': sorted(dates)})
+                keep_cols = ['timestamp', field]
                 for symbol in list(self.assets.keys()):
-                    dates_temp = self.assets['symbol'].get_dates()
-                    dates = dates + dates_temp
-                    dates = list(set(dates))
-                panel = DataFrame({'timestamp': dates})
-                cols_temp = cols.remove(field)
-                for symbol, in list(self.assets.keys()):
-                    data = self.assets['symbol']._prices_cache.copy()
-                    data.drop(cols_temp)
-                    data[symbol] = data[field]
-                    data.drop[field]
+                    data = self.assets[symbol].get_prices(conn)
+                    data = data[keep_cols]
+                    data = data.rename(columns={field: symbol})
                     panel = merge(panel, data, on = 'timestamp', how = 'left')
                 self._panels_cache[field] = panel
+                return self._panels_cache[field]
             else: 
                 return self._panels_cache[field]
                    

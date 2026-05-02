@@ -8,6 +8,6 @@ wheels/
 *.csv
 # Virtual environments
 .venv
-
+.png
 
 .env
