@@ -26,6 +26,19 @@ def cli():
     pass
 
 
+
+# ─── Start Dashboard ────────────────────────────────────---
+@cli.command()
+@click.option("--port", default=8050, type=int, help="Port to bind the dashboard server.")
+@click.option("--host", default="127.0.0.1", help="Host to bind. Use 0.0.0.0 to expose on the LAN.")
+@click.option("--debug", is_flag=True, help="Run Dash in debug mode (auto-reload, dev tools).")
+def dashboard(host: str, port: int, debug: bool) -> None:
+    """Launch the Rosmerta dashboard."""
+    from dashboards.app import run
+    run(host=host, port=port, debug=debug)
+
+
+
 # ─── Fetch command group ────────────────────────────────────
 @cli.group()
 def fetch():
@@ -167,6 +180,175 @@ def fetch_fundamentals(ticker, start, end, no_db):
         console.print("[yellow]Database storage skipped (--no-db)[/yellow]")
 
 
+@fetch.command('dividends')
+@click.argument('ticker')
+@click.option('--start', '-s', default=None,
+              help='Start date (YYYY-MM-DD). Omit for all available.')
+@click.option('--end', '-e', default=None,
+              help='End date (YYYY-MM-DD). Omit for up to present.')
+@click.option('--exchange', default='SMART', help='IB exchange routing (default: SMART)')
+@click.option('--currency', default='USD', help='Contract currency (default: USD)')
+@click.option('--no-fallback', is_flag=True,
+              help='Disable IB fallback when EDGAR returns no data')
+@click.option('--no-db', is_flag=True, help='Skip database storage')
+def fetch_dividends(ticker, start, end, exchange, currency, no_fallback, no_db):
+    """Fetch dividend history from EDGAR (with IB fallback for ADRs).
+ 
+    Routing: tickers with a CIK go to EDGAR; ADRs/foreign tickers go to IB.
+    EDGAR rows have approximate ex-dates (period end); IB rows have real
+    ex-dates and may flag specials. Use --no-fallback to skip the IB step
+    when EDGAR returns nothing.
+ 
+    Example: rosmerta fetch dividends PFE --start 2018-01-01
+    Example: rosmerta fetch dividends NVO --currency DKK
+    """
+    from price_retrival.dividends_api import get_dividends
+ 
+    ticker = ticker.upper()
+    date_range = ""
+    if start and end:
+        date_range = f" ({start} → {end})"
+    elif start:
+        date_range = f" (from {start})"
+    elif end:
+        date_range = f" (up to {end})"
+ 
+    console.print(f"[cyan]Fetching dividends for {ticker}[/cyan]{date_range}")
+ 
+    db_config = get_db_config(no_db)
+ 
+    records, source = get_dividends(
+        ticker=ticker,
+        db_config=db_config,
+        user_agent=email,
+        start_date=start,
+        end_date=end,
+        exchange=exchange,
+        currency=currency,
+        save_to_db=not no_db,
+        try_ib_fallback=not no_fallback,
+    )
+ 
+    if not records:
+        console.print(f"[red]No dividend data found for {ticker}[/red]")
+        return
+ 
+    # Source label
+    source_label = {
+        'edgar': '[green]EDGAR[/green]',
+        'ib': '[blue]IB[/blue]',
+        'ib_fallback': '[yellow]IB (EDGAR fallback)[/yellow]',
+    }.get(source, source)
+    console.print(f"  Source: {source_label}")
+ 
+    # Summary table
+    table = Table(title=f"{ticker} — Dividends ({len(records)} payments)")
+    table.add_column("Ex-date", style="cyan")
+    table.add_column("Pay date", style="dim")
+    table.add_column("Amount", justify="right", style="green")
+    table.add_column("Type", style="yellow")
+    table.add_column("Source", style="dim")
+ 
+    for r in records:
+        ex_date = r.ex_date.strftime('%Y-%m-%d')
+        pay = r.pay_date.strftime('%Y-%m-%d') if r.pay_date else '—'
+        amount = f"{float(r.amount):.4f} {r.currency}"
+        table.add_row(ex_date, pay, amount, r.dividend_type, r.source)
+ 
+    console.print(table)
+ 
+    # Quick stats
+    total = sum(float(r.amount) for r in records)
+    n_special = sum(1 for r in records if r.dividend_type == 'special')
+ 
+    console.print(
+        f"\n[bold]Total per share:[/bold] {total:.4f}"
+        + (f"  ([yellow]{n_special} special[/yellow])" if n_special else "")
+    )
+ 
+    if not no_db:
+        console.print("[green]✓ Saved to database[/green]")
+        console.print("[dim]Ticker added to 'dividends' watchlist[/dim]")
+    else:
+        console.print("[yellow]Database storage skipped (--no-db)[/yellow]")
+ 
+
+
+# ─── Portfolio command ──────────────────────────────────────
+@cli.command('portfolio')
+def portfolio():
+    """Show current IB portfolio positions.
+
+    Example: rosmerta portfolio
+    """
+    from price_retrival.portfolio import fetch_portfolio
+
+    console.print("[cyan]Fetching portfolio from Interactive Brokers…[/cyan]\n")
+
+    positions = fetch_portfolio(host='127.0.0.1', port=4001)
+
+    if not positions:
+        console.print("[yellow]No positions found (or could not connect to IB).[/yellow]")
+        return
+
+    # ── Build summary table ─────────────────────────────────
+    table = Table(title="Portfolio Positions")
+    table.add_column("Symbol", style="cyan bold")
+    table.add_column("Type", style="dim")
+    table.add_column("Qty", justify="right")
+    table.add_column("Avg Cost", justify="right", style="dim")
+    table.add_column("Mkt Price", justify="right")
+    table.add_column("Mkt Value", justify="right")
+    table.add_column("Unrealised P&L", justify="right")
+    table.add_column("Realised P&L", justify="right")
+    table.add_column("Currency", style="dim")
+
+    total_value = 0.0
+    total_unrealised = 0.0
+    total_realised = 0.0
+
+    for p in positions:
+        # Colour P&L
+        upnl = p['unrealised_pnl']
+        rpnl = p['realised_pnl']
+        upnl_style = "green" if upnl >= 0 else "red"
+        rpnl_style = "green" if rpnl >= 0 else "red"
+
+        table.add_row(
+            p['symbol'],
+            p['sec_type'],
+            f"{p['position']:,.0f}",
+            f"{p['avg_cost']:,.2f}",
+            f"{p['market_price']:,.2f}",
+            f"{p['market_value']:,.2f}",
+            f"[{upnl_style}]{upnl:+,.2f}[/{upnl_style}]",
+            f"[{rpnl_style}]{rpnl:+,.2f}[/{rpnl_style}]",
+            p['currency'],
+        )
+
+        total_value += p['market_value']
+        total_unrealised += upnl
+        total_realised += rpnl
+
+    console.print(table)
+
+    # ── Totals ──────────────────────────────────────────────
+    unrealised_style = "green" if total_unrealised >= 0 else "red"
+    realised_style = "green" if total_realised >= 0 else "red"
+
+    console.print(
+        f"\n[bold]Total market value:[/bold]  {total_value:>12,.2f}"
+    )
+    console.print(
+        f"[bold]Unrealised P&L:[/bold]     "
+        f"[{unrealised_style}]{total_unrealised:>+12,.2f}[/{unrealised_style}]"
+    )
+    console.print(
+        f"[bold]Realised P&L:[/bold]       "
+        f"[{realised_style}]{total_realised:>+12,.2f}[/{realised_style}]"
+    )
+
+
 # ─── Bulk command group ─────────────────────────────────────
 @cli.group()
 def bulk():
@@ -216,6 +398,35 @@ def bulk_fundamentals(list_name, start, end, dry_run, force, max_age):
     """
     _run_bulk_fetch(list_name, start, end, dry_run, 'fundamentals',
                     force=force, max_age_days=max_age)
+
+@bulk.command('dividends')
+@click.option('--list', '-l', 'list_name', required=True,
+              help='Watchlist name to fetch (e.g. core, pharma_top20)')
+@click.option('--start', '-s', default=None,
+              help='Start date (YYYY-MM-DD). Omit for all available.')
+@click.option('--end', '-e', default=None,
+              help='End date (YYYY-MM-DD). Omit for up to present.')
+@click.option('--exchange', default='SMART', help='IB exchange routing (default: SMART)')
+@click.option('--no-fallback', is_flag=True,
+              help='Disable IB fallback when EDGAR returns no data')
+@click.option('--delay', default=1, type=int,
+              help='Seconds between tickers (default: 1)')
+@click.option('--dry-run', is_flag=True, default=False,
+              help='Show what would be fetched without fetching')
+def bulk_dividends(list_name, start, end, exchange, no_fallback, delay, dry_run):
+    """Fetch dividend history for all stocks in a watchlist.
+ 
+    Each ticker is routed via the EDGAR/IB dispatcher. Tickers that return
+    any dividend records are added to the 'dividends' watchlist
+    automatically (duplicates are ignored).
+ 
+    Example: rosmerta bulk dividends --list core
+    Example: rosmerta bulk dividends --list core --start 2018-01-01
+    """
+    _run_bulk_fetch(list_name, start, end, dry_run, 'dividends',
+                    exchange=exchange, delay=delay,
+                    try_ib_fallback=not no_fallback)
+ 
 
 
 # ─── Shared bulk fetch logic ───────────────────────────────
@@ -306,17 +517,19 @@ def _show_results(results, list_name, record_label='Records'):
         f"{total:,} total {record_label.lower()} fetched"
     )
 
-
 def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
-                    exchange='SMART', delay=2, force=False, max_age_days=30):
-    """Shared implementation for bulk price and bulk fundamentals commands."""
+                    exchange='SMART', delay=2, force=False, max_age_days=30,
+                    try_ib_fallback=True):
+    """Shared implementation for bulk price, fundamentals, and dividends."""
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
-    from price_retrival.bulk_fetch import bulk_fetch_prices, bulk_fetch_fundamentals
-
+    from price_retrival.bulk_fetch import (
+        bulk_fetch_prices, bulk_fetch_fundamentals, bulk_fetch_dividends
+    )
+ 
     tickers = _resolve_watchlist(list_name)
     if tickers is None:
         return
-
+ 
     # ── Preview ─────────────────────────────────────────────
     date_range = ""
     if start and end:
@@ -325,19 +538,19 @@ def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
         date_range = f"  from {start}"
     elif end:
         date_range = f"  up to {end}"
-
+ 
     console.print(
         f"\n[bold]Bulk {fetch_type} fetch:[/bold] [cyan]{list_name}[/cyan] "
         f"({len(tickers)} stocks){date_range}"
     )
-
+ 
     if dry_run:
         _show_dry_run(list_name, tickers)
         return
-
+ 
     # ── Fetch with progress ─────────────────────────────────
     db_config = get_db_config()
-
+ 
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -346,15 +559,15 @@ def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
         console=console,
     ) as progress:
         task = progress.add_task(f"Fetching {list_name}...", total=len(tickers))
-
+ 
         def on_start(i, symbol):
             progress.update(task, description=f"Fetching {symbol}...")
-
+ 
         def on_complete(i, result):
             if result.status == 'error':
                 console.print(f"  [red]✗ {result.symbol}: {result.error}[/red]")
             progress.update(task, advance=1)
-
+ 
         if fetch_type == 'price':
             results = bulk_fetch_prices(
                 tickers=tickers,
@@ -367,7 +580,8 @@ def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
                 on_ticker_complete=on_complete,
             )
             record_label = 'Bars'
-        else:
+ 
+        elif fetch_type == 'fundamentals':
             if force:
                 console.print("[yellow]--force: re-fetching all tickers[/yellow]")
             else:
@@ -375,7 +589,7 @@ def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
                     f"[dim]Skipping tickers fetched within the last "
                     f"{max_age_days} days (use --force to override)[/dim]"
                 )
-
+ 
             results = bulk_fetch_fundamentals(
                 tickers=tickers,
                 db_config=db_config,
@@ -388,7 +602,25 @@ def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
                 on_ticker_complete=on_complete,
             )
             record_label = 'Periods'
-
+ 
+        elif fetch_type == 'dividends':
+            results = bulk_fetch_dividends(
+                tickers=tickers,
+                db_config=db_config,
+                user_agent=email,
+                start=start,
+                end=end,
+                exchange=exchange,
+                try_ib_fallback=try_ib_fallback,
+                delay=delay,
+                on_ticker_start=on_start,
+                on_ticker_complete=on_complete,
+            )
+            record_label = 'Dividends'
+ 
+        else:
+            raise ValueError(f"Unknown fetch_type: {fetch_type}")
+ 
     _show_results(results, list_name, record_label)
 
 

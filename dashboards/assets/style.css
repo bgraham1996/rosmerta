@@ -1,0 +1,261 @@
+/* ── Page baseline ──────────────────────────────────────────────────── */
+html, body {
+    margin: 0;
+    padding: 0;
+    background-color: #0f1115;
+    color: #e4e6eb;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+#global-header {
+    background-color: #171a21;
+    border-bottom: 1px solid #262b36 !important;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+}
+
+#global-header h1 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #e4e6eb;
+    margin: 0;
+    letter-spacing: 0.02em;
+}
+
+/* ── Dropdown overrides (Dash defaults are aggressively light) ─────── */
+.Select-control,
+.Select-menu-outer,
+.VirtualizedSelectFocusedOption {
+    background-color: #1d2129 !important;
+    color: #e4e6eb !important;
+    border-color: #262b36 !important;
+    border-radius: 6px !important;
+}
+
+.Select-value-label,
+.Select-placeholder {
+    color: #e4e6eb !important;
+}
+
+.Select-menu-outer {
+    border-color: #262b36 !important;
+}
+
+.VirtualizedSelectOption {
+    background-color: #1d2129 !important;
+    color: #e4e6eb !important;
+}
+
+.VirtualizedSelectFocusedOption {
+    background-color: #262b36 !important;
+}
+
+.Select-arrow {
+    border-color: #9098a8 transparent transparent !important;
+}
+
+/* ── Inputs ─────────────────────────────────────────────────────────── */
+input[type="text"], input[type="number"] {
+    background-color: #1d2129;
+    color: #e4e6eb;
+    border: 1px solid #262b36;
+    border-radius: 6px;
+    padding: 0.4rem 0.6rem;
+    font-family: inherit;
+    font-size: 14px;
+}
+
+input[type="text"]:focus, input[type="number"]:focus {
+    outline: none;
+    border-color: #7aa2f7;
+}
+
+/* ── Buttons ────────────────────────────────────────────────────────── */
+button {
+    background-color: #1d2129;
+    color: #e4e6eb;
+    border: 1px solid #262b36;
+    border-radius: 6px;
+    padding: 0.4rem 0.9rem;
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s;
+}
+
+button:hover {
+    background-color: #262b36;
+    border-color: #7aa2f7;
+}
+
+button:active {
+    background-color: #171a21;
+}
+
+/* ── Labels ─────────────────────────────────────────────────────────── */
+label {
+    color: #9098a8;
+    font-size: 12px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* ── Card / panel utility ───────────────────────────────────────────── */
+.panel {
+    background-color: #171a21;
+    border: 1px solid #262b36;
+    border-radius: 6px;
+    padding: 1rem;
+}
+
+
+/* ── Controls row (shared layout for ticker, date, button) ──────────── */
+.controls-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.control-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.control-button {
+    height: 36px;            /* matches input height */
+    padding: 0 1.2rem;
+    align-self: flex-end;
+}
+
+/* ── DatePickerRange overrides ──────────────────────────────────────── */
+/* Dash's date picker is a separate React component with its own class
+   names (DateInput, DateRangePickerInput, etc.) — base input rules
+   don't reach it, so we override here. */
+
+.DateRangePickerInput,
+.DateInput,
+.DateInput_input {
+    background-color: #1d2129 !important;
+    color: #e4e6eb !important;
+    border-color: #262b36 !important;
+}
+
+.DateRangePickerInput {
+    border: 1px solid #262b36 !important;
+    border-radius: 6px !important;
+    overflow: hidden;
+    height: 36px;
+    display: flex;
+    align-items: center;
+}
+
+.DateInput {
+    background: transparent !important;
+    width: 110px;
+}
+
+.DateInput_input {
+    font-family: inherit;
+    font-size: 14px;
+    background: transparent !important;
+    border: none !important;
+    padding: 0.4rem 0.6rem;
+    text-align: center;
+}
+
+.DateInput_input__focused {
+    border-bottom: 2px solid #7aa2f7 !important;
+}
+
+.DateRangePickerInput_arrow_svg {
+    fill: #9098a8 !important;
+}
+
+.DateRangePicker_picker {
+    background-color: #171a21 !important;
+    border: 1px solid #262b36 !important;
+    border-radius: 6px;
+}
+
+/* Calendar dropdown */
+.CalendarMonth, .CalendarMonthGrid, .DayPicker, .DayPicker_transitionContainer {
+    background-color: #171a21 !important;
+}
+
+.CalendarMonth_caption {
+    color: #e4e6eb !important;
+}
+
+.DayPicker_weekHeader,
+.DayPicker_weekHeader_li small {
+    color: #9098a8 !important;
+}
+
+.CalendarDay__default {
+    background-color: #171a21 !important;
+    color: #e4e6eb !important;
+    border-color: #262b36 !important;
+}
+
+.CalendarDay__default:hover {
+    background-color: #262b36 !important;
+    border-color: #7aa2f7 !important;
+}
+
+.CalendarDay__selected,
+.CalendarDay__selected:active,
+.CalendarDay__selected:hover {
+    background-color: #7aa2f7 !important;
+    border-color: #7aa2f7 !important;
+    color: #0f1115 !important;
+}
+
+.CalendarDay__selected_span {
+    background-color: rgba(122, 162, 247, 0.25) !important;
+    border-color: #262b36 !important;
+    color: #e4e6eb !important;
+}
+
+.CalendarDay__hovered_span {
+    background-color: rgba(122, 162, 247, 0.15) !important;
+    border-color: #262b36 !important;
+    color: #e4e6eb !important;
+}
+
+.DayPickerNavigation_button {
+    background-color: #1d2129 !important;
+    border-color: #262b36 !important;
+}
+
+.DayPickerNavigation_svg__horizontal {
+    fill: #9098a8 !important;
+}
+
+/* ── Chart panel title strip ────────────────────────────────────────── */
+.chart-panel {
+    padding: 0;        /* override default panel padding */
+    overflow: hidden;  /* clip to rounded corners */
+}
+
+.chart-header {
+    padding: 0.9rem 1.25rem;
+    border-bottom: 1px solid #262b36;
+    background-color: #1a1d24;  /* slightly lifted from main panel */
+}
+
+.chart-header h2 {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #e4e6eb;
+}
