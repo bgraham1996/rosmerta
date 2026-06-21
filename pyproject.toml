@@ -26,3 +26,16 @@ dependencies = [
     "seaborn>=0.13.2",
     "statsmodels>=0.14.6",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+]
+
+[tool.pytest.ini_options]
+# Only the DB-free unit suite under tests/ is collected. The root-level
+# *_test.py files and dev_test/ are runnable scripts that hit a live
+# PostgreSQL — they are intentionally excluded from automated collection.
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra"

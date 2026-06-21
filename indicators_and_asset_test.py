@@ -66,4 +66,10 @@ fig.tight_layout()
 fig.savefig(f'{ticker}_price_levels.png', dpi=120)
 plt.close(fig)
 
+with connection as conn:
+    pfe.get_growth()
+    print(pfe._growth_cache.head(5))
+
+
+
 print("End of File")

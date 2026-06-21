@@ -23,3 +23,13 @@ with conn:
     market.populate_assets(conn)
     market.get_panel(conn, 'close')
     print(market.get_panel(conn, 'close').head(5))
+
+    market.get_market_stats(conn)
+    print(market._market_stats['close'].head(5))
+
+
+with conn:
+    market.get_growth(conn)
+    market.get_panel(conn, 'volume')
+    market.get_market_stats(conn, agg_option='volume')
+    print(market._market_stats['volume'].head(5))

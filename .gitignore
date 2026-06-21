@@ -11,3 +11,6 @@ wheels/
 .png
 
 .env
+
+db_exports/
+
