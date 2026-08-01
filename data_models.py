@@ -282,7 +282,39 @@ class Asset:
                 return grouped
         else:
             return self._levels_cache
-                
+    
+    def get_offset_growth(self, conn, days=20, mode='pct', column='close'):
+        """Forward-looking gain ``days`` trading days after each bar.
+
+        Wraps the ``days_offset_gain`` indicator with the bar-count lookahead
+        matching this asset's timeframe (8 bars/day hourly, 1 daily, 1/5
+        weekly), so e.g. ``days=30`` on hourly data looks 240 bars ahead.
+        The raw material for questions like "how often is price within
+        ±0.2% thirty days after investment".
+
+        Returns a DataFrame of ``timestamp`` + ``gain_{days}d`` — the
+        fractional (``mode='pct'``) or absolute (``mode='abs'``) change in
+        ``column`` — with NaN where the offset runs past the window. The
+        underlying indicator is cached on the asset like any other
+        (retrievable via ``get_indicator('days_offset_gain', ...)``).
+        """
+        bars_per_day = {'hourly': 8, 'daily': 1, 'weekly': 1 / 5}.get(self.timeframe)
+        if bars_per_day is None:
+            raise ValueError(f"Offset growth not supported for timeframe '{self.timeframe}'")
+        if int(days * bars_per_day) < 1:
+            raise ValueError(f"{days} days is under one {self.timeframe} bar — nothing to offset")
+
+        from indicators import Indicator
+        indicator = self.add_indicator(
+            Indicator('days_offset_gain', days_ahead=days, bars_per_day=bars_per_day,
+                      mode=mode, offset_column=column),
+            conn, source=['timestamp', column],
+        )
+        prices = self.get_prices(conn)
+        result = DataFrame()
+        result['timestamp'] = prices['timestamp']
+        result[f'gain_{days}d'] = indicator.compute(prices[['timestamp', column]])
+        return result
 
 class Market:
     """A panel of ``Asset``s drawn from a named watchlist.
@@ -431,8 +463,18 @@ class Market:
         self._market_stats[agg_option] = data
         return self._market_stats[agg_option]
 
+    def add_indicators(self, conn, indicator, source='close'):
+        """Apply an indicator to every asset in the market.
 
-
+        Each asset gets its own copy of ``indicator`` (same name + params):
+        ``Indicator.compute`` caches its result on the instance, so sharing
+        one instance would give every asset the first asset's values.
+        """
+        from indicators import Indicator
+        for key, value in self.assets.items():
+            value.add_indicator(
+                Indicator(indicator.name, **indicator.params), conn, source=source
+            )
 
 
 

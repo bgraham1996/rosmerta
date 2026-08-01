@@ -12,6 +12,8 @@ from db_config import get_db_config
 
 load_dotenv()
 email = os.getenv('email')
+ib_flex_token = os.getenv('IB_FLEX_TOKEN')
+ib_flex_trades_query_id = os.getenv('IB_FLEX_TRADES_QUERY_ID')
 
 
 
@@ -271,7 +273,70 @@ def fetch_dividends(ticker, start, end, exchange, currency, no_fallback, no_db):
         console.print("[dim]Ticker added to 'dividends' watchlist[/dim]")
     else:
         console.print("[yellow]Database storage skipped (--no-db)[/yellow]")
- 
+
+
+@fetch.command('trades')
+@click.option('--start', '-s', default=None,
+              help='Start date (YYYY-MM-DD). Filters the report; omit for all.')
+@click.option('--end', '-e', default=None,
+              help='End date (YYYY-MM-DD). Filters the report; omit for all.')
+@click.option('--no-db', is_flag=True, help='Skip database storage')
+def fetch_trades(start, end, no_db):
+    """Fetch executed trades from IB via the Flex Web Service.
+
+    Pulls the full Trades history from a saved IB Flex Query (no Gateway
+    needed) and stores stock executions into the transaction + trade tables.
+    Requires IB_FLEX_TOKEN and IB_FLEX_TRADES_QUERY_ID in .env.
+
+    Example: rosmerta fetch trades
+    Example: rosmerta fetch trades --start 2024-01-01 --end 2024-12-31
+    """
+    from price_retrival.trades_api import IBTradesFetcher
+
+    if not ib_flex_token or not ib_flex_trades_query_id:
+        console.print(
+            "[red]Missing Flex credentials.[/red] Set IB_FLEX_TOKEN and "
+            "IB_FLEX_TRADES_QUERY_ID in .env."
+        )
+        return
+
+    date_range = ""
+    if start and end:
+        date_range = f" ({start} → {end})"
+    elif start:
+        date_range = f" (from {start})"
+    elif end:
+        date_range = f" (up to {end})"
+
+    console.print(f"[cyan]Fetching trades from IB Flex[/cyan]{date_range}")
+
+    db_config = get_db_config(no_db)
+
+    with IBTradesFetcher(
+        token=ib_flex_token,
+        query_id=ib_flex_trades_query_id,
+        db_config=db_config,
+    ) as fetcher:
+        df, summary = fetcher.get_trades(start, end, save_to_db=not no_db)
+
+    if df is None or df.empty:
+        console.print("[red]No trades retrieved.[/red]")
+        return
+
+    console.print(f"  Downloaded [bold]{len(df)}[/bold] trade rows")
+
+    if summary is not None:
+        table = Table(title="Trade ingest")
+        table.add_column("Outcome", style="cyan")
+        table.add_column("Count", justify="right", style="green")
+        table.add_row("Inserted", str(summary['inserted']))
+        table.add_row("Skipped (duplicate)", str(summary['skipped_duplicate']))
+        table.add_row("Skipped (non-stock)", str(summary['skipped_non_stock']))
+        table.add_row("Errors", str(summary['errors']))
+        console.print(table)
+        console.print("[green]✓ Saved to database[/green]")
+    else:
+        console.print("[yellow]Database storage skipped (--no-db)[/yellow]")
 
 
 # ─── Portfolio command ──────────────────────────────────────

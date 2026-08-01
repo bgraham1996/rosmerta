@@ -1,0 +1,366 @@
+{
+  "main": {
+    "id": "e4d13c46d0be01a6",
+    "type": "split",
+    "children": [
+      {
+        "id": "c2fc612c3bdbea42",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "ea8606cbe8ad35ab",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "vault/Versions/V1000/Rosmerta/rosmerta 1.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "rosmerta 1"
+            }
+          },
+          {
+            "id": "afdbf61052a3cf75",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "vault/templates/base-dev-item.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "base-dev-item"
+            }
+          },
+          {
+            "id": "aea3e3e58b42c5b6",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "vault/Versions/V1000/Rosmerta/rosmerta 1.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "rosmerta 1"
+            }
+          },
+          {
+            "id": "821cdea0064f6d2a",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "vault/Dev-Items/RSI Indicators.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "RSI Indicators"
+            }
+          },
+          {
+            "id": "5069de76447456e9",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "vault/Dev-Items/EMA Indicator.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "EMA Indicator"
+            }
+          },
+          {
+            "id": "cf759fd0485214f0",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "vault/Versions/V1000/Rosmerta/Roadmap & Versioning.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "Roadmap & Versioning"
+            }
+          }
+        ],
+        "currentTab": 5
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "30550f7e71268a1c",
+    "type": "split",
+    "children": [
+      {
+        "id": "162b72515b82aaeb",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "203c3cd5fce7d1b4",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "afad2503f524c375",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "a98e72c05e623460",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ],
+        "currentTab": 2
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "322fe9f4ad2b9b8f",
+    "type": "split",
+    "children": [
+      {
+        "id": "866ebf6e43fe3cd6",
+        "type": "tabs",
+        "dimension": 27.117031398667933,
+        "children": [
+          {
+            "id": "e0302d5b29d4f496",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "vault/Versions/V1000/Rosmerta/Roadmap & Versioning.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks"
+            }
+          },
+          {
+            "id": "fe7926c8e93f0633",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "vault/Versions/V1000/Rosmerta/Roadmap & Versioning.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links"
+            }
+          },
+          {
+            "id": "03653bec465ba3cc",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "7e92befeb4d7fb76",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "e439b10a5d83a46e",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "vault/Versions/V1000/Rosmerta/Roadmap & Versioning.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline"
+            }
+          }
+        ],
+        "currentTab": 2
+      },
+      {
+        "id": "0b15d31e9a9db7d4",
+        "type": "tabs",
+        "dimension": 40.05708848715509,
+        "children": [
+          {
+            "id": "b86ca246ac8c5488",
+            "type": "leaf",
+            "state": {
+              "type": "file-properties",
+              "state": {
+                "file": "vault/Versions/V1000/Rosmerta/Roadmap & Versioning.md"
+              },
+              "icon": "lucide-info",
+              "title": "File properties"
+            }
+          }
+        ]
+      },
+      {
+        "id": "603a5589f90abee3",
+        "type": "tabs",
+        "dimension": 32.825880114176975,
+        "children": [
+          {
+            "id": "c7afe070b5d96de3",
+            "type": "leaf",
+            "state": {
+              "type": "localgraph",
+              "state": {
+                "file": "vault/Versions/V1000/Rosmerta/Roadmap & Versioning.md",
+                "options": {
+                  "collapse-filter": false,
+                  "search": "",
+                  "localJumps": 2,
+                  "localBacklinks": true,
+                  "localForelinks": true,
+                  "localInterlinks": false,
+                  "showTags": false,
+                  "showAttachments": false,
+                  "hideUnresolved": false,
+                  "collapse-color-groups": true,
+                  "colorGroups": [],
+                  "collapse-display": true,
+                  "showArrow": false,
+                  "textFadeMultiplier": 0,
+                  "nodeSizeMultiplier": 1,
+                  "lineSizeMultiplier": 1,
+                  "collapse-forces": true,
+                  "centerStrength": 0.518713248970312,
+                  "repelStrength": 10,
+                  "linkStrength": 1,
+                  "linkDistance": 250,
+                  "scale": 0.30441471379665674,
+                  "close": true
+                }
+              },
+              "icon": "lucide-git-fork",
+              "title": "Local graph"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false,
+      "templater-obsidian:Templater": false
+    }
+  },
+  "active": "cf759fd0485214f0",
+  "lastOpenFiles": [
+    "vault/Analytics/Running the reports.md",
+    "vault/Analytics/Price Behaviour Analytics.md",
+    "vault/Analytics",
+    "vault/Versions/V1000/Rosmerta/Supporting Notes.md",
+    "vault/Versions/V1000/Rosmerta/Testing.md",
+    "vault/Versions/V1000/Rosmerta/README 1.md",
+    "vault/Versions/V1000/Rosmerta/rosmerta 1.md",
+    "vault/Versions/V1000/Rosmerta/CLAUDE 1.md",
+    "vault/Versions/V1000/Rosmerta/Rosmerta MOC.md",
+    "vault/Versions/V1000/Rosmerta/Architecture Vision.md",
+    "vault/Versions/V1000/Rosmerta",
+    "vault/Versions/V1000/Rosmerta/Project Log & Milestones.md",
+    "vault/change the name of daily notes to something like periodic_notes.md",
+    "vault/Versions/V1000/Rosmerta/Roadmap & Versioning.md",
+    "vault/Versions/V1000",
+    "vault/Versions",
+    "vault/Parent Vault Intel.md",
+    "vault/Dashboards/Dashboards.md",
+    "vault/Dashboards/dev - prod - test deployment and configuration.md",
+    "vault/Dev-Items/Docs for using indicators.md",
+    "vault/Dev-Items/RSI Indicators.md",
+    "vault/Dev-Items/MACD Indicator.md",
+    "vault/Dev-Items/EMA Indicator.md",
+    "vault/Dev-Items",
+    "vault/Dashboards/Untitled.base",
+    "vault/Dashboards/All dev items.md",
+    "AMD_price_levels.png",
+    "All Dev Items.canvas",
+    "vault/templates/base-cycle.md",
+    "vault/templates/base-dev-item.md",
+    "vault/Dev-Items/Install process.md",
+    "vault/Dev-Items/Lookforawd gains.md",
+    "Untitled.canvas",
+    "vault/templates/feature-request.md",
+    "vault/templates/tech-debt.md"
+  ]
+}

@@ -158,6 +158,42 @@ def test_add_indicator_multi_column_source(conn, date_bounds):
     assert len(obv._result) == 5
 
 
+def test_get_offset_growth_hourly(db, utc, date_bounds):
+    start, end = date_bounds
+    # Ten hourly bars with close = 1..10; hourly maps days=1 to 8 bars ahead.
+    db.prices[1] = [
+        (1, utc(2024, 1, 2, 9 + i), float(i + 1), float(i + 1),
+         float(i + 1), float(i + 1), 100.0)
+        for i in range(10)
+    ]
+    conn = db.conn()
+    a = Asset(conn, "ACME", start, end)
+    growth = a.get_offset_growth(conn, days=1)
+    assert list(growth.columns) == ["timestamp", "gain_1d"]
+    assert growth["gain_1d"].iloc[0] == pytest.approx(8.0)  # (9 - 1) / 1
+    assert growth["gain_1d"].iloc[1] == pytest.approx(4.0)  # (10 - 2) / 2
+    assert growth["gain_1d"].iloc[2:].isna().all()
+    # cached on the asset like any other indicator
+    assert a.get_indicator(
+        "days_offset_gain", days_ahead=1, bars_per_day=8,
+        mode="pct", offset_column="close",
+    ) is not None
+
+
+def test_get_offset_growth_unsupported_timeframe(conn, date_bounds):
+    start, end = date_bounds
+    a = Asset(conn, "ACME", start, end, timeframe="monthly")
+    with pytest.raises(ValueError, match="not supported"):
+        a.get_offset_growth(conn)
+
+
+def test_get_offset_growth_under_one_bar(conn, date_bounds):
+    start, end = date_bounds
+    a = Asset(conn, "ACME", start, end, timeframe="weekly")
+    with pytest.raises(ValueError, match="under one"):
+        a.get_offset_growth(conn, days=4)  # 4 days < one weekly bar
+
+
 # --- Market ----------------------------------------------------------------
 
 

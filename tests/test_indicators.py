@@ -11,7 +11,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from indicators import Indicator, _REGISTRY, sma, ema, rsi, bollinger, obv, vwap
+from indicators import (
+    Indicator, _REGISTRY, sma, ema, rsi, bollinger, obv, vwap, days_offset_gain,
+)
 
 
 @pytest.fixture
@@ -102,6 +104,59 @@ def test_vwap_small_window():
     np.testing.assert_allclose(result.iloc[1], expected)
 
 
+# --- days_offset_gain (forward-looking) --------------------------------------
+
+
+@pytest.fixture
+def offset_frame():
+    """Six hourly bars; with ``bars_per_day=2`` each 'day' is two bars."""
+    return pd.DataFrame(
+        {
+            "timestamp": pd.date_range(
+                "2024-01-02 09:00", periods=6, freq="h", tz="UTC"
+            ),
+            "close": [10.0, 20.0, 40.0, 10.0, 30.0, 60.0],
+        }
+    )
+
+
+def test_days_offset_gain_pct(offset_frame):
+    result = days_offset_gain(offset_frame, days_ahead=1, bars_per_day=2)
+    # Two bars ahead: (40-10)/10, (10-20)/20, (30-40)/40, (60-10)/10.
+    np.testing.assert_allclose(result.iloc[:4].to_numpy(), [3.0, -0.5, -0.25, 5.0])
+    # The last days_ahead*bars_per_day bars have no future bar to compare to.
+    assert result.iloc[4:].isna().all()
+
+
+def test_days_offset_gain_abs(offset_frame):
+    result = days_offset_gain(offset_frame, days_ahead=1, bars_per_day=2, mode="abs")
+    np.testing.assert_allclose(result.iloc[:4].to_numpy(), [30.0, -10.0, -10.0, 50.0])
+    assert result.iloc[4:].isna().all()
+
+
+def test_days_offset_gain_fractional_bars_per_day(offset_frame):
+    # Weekly-style fraction: 10 days at 1/5 bars per day = the same 2-bar offset.
+    frac = days_offset_gain(offset_frame, days_ahead=10, bars_per_day=1 / 5)
+    whole = days_offset_gain(offset_frame, days_ahead=1, bars_per_day=2)
+    pd.testing.assert_series_equal(frac, whole)
+
+
+def test_days_offset_gain_sorts_by_timestamp(offset_frame):
+    # An out-of-order frame must give each bar the same value it gets when
+    # sorted; results come back aligned to the caller's index.
+    shuffled = offset_frame.sample(frac=1, random_state=0)
+    result = days_offset_gain(shuffled, days_ahead=1, bars_per_day=2)
+    expected = days_offset_gain(offset_frame, days_ahead=1, bars_per_day=2)
+    for idx in offset_frame.index:
+        a, b = result.loc[idx], expected.loc[idx]
+        assert (math.isnan(a) and math.isnan(b)) or a == b
+
+
+def test_days_offset_gain_unknown_mode_raises(offset_frame):
+    with pytest.raises(ValueError, match="unknown mode"):
+        days_offset_gain(offset_frame, mode="median")
+
+
 # --- Indicator wrapper -----------------------------------------------------
 
 
@@ -127,5 +182,5 @@ def test_indicator_compute_caches_result(closes):
 
 
 def test_builtins_are_registered():
-    for name in ["sma", "ema", "rsi", "bollinger", "obv", "vwap"]:
+    for name in ["sma", "ema", "rsi", "bollinger", "obv", "vwap", "days_offset_gain"]:
         assert name in _REGISTRY

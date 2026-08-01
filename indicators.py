@@ -120,3 +120,44 @@ def vwap(data, window=20):
     typical_price = (data['close'] + data['high'] + data['low']) / 3
     return (typical_price * data['volume']).rolling(window).sum() / data['volume'].rolling(window).sum()
 
+
+# None typucal 'indicators, ie just things I want to calculate'
+
+@register("days_offset_gain")
+def days_offset_gain(data, days_ahead=20, bars_per_day=8, mode='pct', offset_column='close'):
+    """Forward-looking gain: for each bar, the change in ``offset_column`` when
+    looking ``days_ahead`` days ahead, measured in bars.
+
+    The lookahead is applied at the bar level: it offsets by
+    ``days_ahead * bars_per_day`` bars, so ``bars_per_day`` must match the
+    current timeframe (e.g. 8 for hourly, 1 for daily, 1/5 for weekly —
+    fractions are fine, the product is truncated to whole bars). Requires an OHLCV
+    DataFrame with a ``timestamp`` column (call via ``source=['timestamp',
+    <col>]``). ``mode='pct'`` returns the fractional return, ``mode='abs'`` the
+    raw price difference. Bars whose offset runs past the end of the series
+    yield ``NaN``.
+    """
+    if mode not in ('pct', 'abs'):
+        raise ValueError(f"days_offset_gain: unknown mode {mode!r}; use 'pct' or 'abs'")
+
+    if data.empty:
+        return pd.Series(dtype='float64', index=data.index)
+
+    # Sort by timestamp first so the positional shift below always looks
+    # strictly forward in time regardless of the caller's row order; the
+    # original index labels are preserved so we can realign at the end.
+    dt = data[['timestamp', offset_column]].sort_values('timestamp')
+    current = dt[offset_column]
+
+    # Offset by whole bars: days_ahead * bars_per_day, truncated (e.g. 1/5
+    # bars/day for weekly is fine — only the product matters).
+    future = current.shift(-int(days_ahead * bars_per_day))
+
+    if mode == 'pct':
+        values = (future - current) / current
+    else:  # 'abs'
+        values = future - current
+
+    # Realign to the order the caller handed us.
+    return values.reindex(data.index)
+

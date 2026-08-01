@@ -1,0 +1,227 @@
+<title>Red-Wednesday Dip Entry — Backtest</title>
+<style>
+:root{
+  --plane:#f4f5f2;--surface:#fbfbf9;--surface-2:#f0f1ed;--ink:#14161a;--ink-2:#565a52;--muted:#8a8d84;
+  --grid:#e4e5df;--axis:#c7c8c0;--border:rgba(20,22,26,.10);--accent:#2a5cbf;--accent-soft:#dfe8fa;
+  --up:#0a7d33;--down:#c0392b;--warn:#b8791a;
+  --shadow:0 1px 2px rgba(20,22,26,.05),0 8px 24px -12px rgba(20,22,26,.12);
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;--sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+@media (prefers-color-scheme:dark){:root{
+  --plane:#0c0d0c;--surface:#171817;--surface-2:#1f201e;--ink:#f2f2ee;--ink-2:#b6b8ad;--muted:#84867c;
+  --grid:#2a2b28;--axis:#3a3b37;--border:rgba(255,255,255,.10);--accent:#6b9bf0;--accent-soft:#1d2740;
+  --up:#2ba24e;--down:#e05043;--warn:#e0a94a;--shadow:0 1px 2px rgba(0,0,0,.4),0 12px 30px -14px rgba(0,0,0,.7);}}
+:root[data-theme="light"]{--plane:#f4f5f2;--surface:#fbfbf9;--surface-2:#f0f1ed;--ink:#14161a;--ink-2:#565a52;--muted:#8a8d84;--grid:#e4e5df;--axis:#c7c8c0;--border:rgba(20,22,26,.10);--accent:#2a5cbf;--accent-soft:#dfe8fa;--up:#0a7d33;--down:#c0392b;--warn:#b8791a;}
+:root[data-theme="dark"]{--plane:#0c0d0c;--surface:#171817;--surface-2:#1f201e;--ink:#f2f2ee;--ink-2:#b6b8ad;--muted:#84867c;--grid:#2a2b28;--axis:#3a3b37;--border:rgba(255,255,255,.10);--accent:#6b9bf0;--accent-soft:#1d2740;--up:#2ba24e;--down:#e05043;--warn:#e0a94a;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased;font-size:15px}
+.wrap{max-width:1080px;margin:0 auto;padding:clamp(20px,4vw,52px) clamp(16px,3vw,32px) 72px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600;margin:0 0 14px}
+h1{font-size:clamp(25px,4vw,38px);line-height:1.08;letter-spacing:-.02em;margin:0;font-weight:680;text-wrap:balance}
+.lede{color:var(--ink-2);max-width:66ch;margin:14px 0 0;font-size:16px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.chip{font-family:var(--mono);font-size:12px;color:var(--ink-2);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:5px 12px}
+.chip b{color:var(--ink);font-weight:600}
+.verdict{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:30px 0 8px}
+@media(max-width:720px){.verdict{grid-template-columns:1fr}}
+.vc{border:1px solid var(--border);border-radius:14px;padding:18px 20px;background:var(--surface);box-shadow:var(--shadow);border-left:4px solid var(--muted)}
+.vc.yes{border-left-color:var(--up)}.vc.no{border-left-color:var(--down)}
+.vc .tag{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700}
+.vc.yes .tag{color:var(--up)}.vc.no .tag{color:var(--down)}
+.vc h3{margin:6px 0 6px;font-size:17px;font-weight:640}
+.vc p{margin:0;font-size:13.5px;color:var(--ink-2)}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:13px;margin:22px 0 8px}
+@media(max-width:820px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:15px;box-shadow:var(--shadow)}
+.kpi .lab{font-size:11.5px;color:var(--ink-2);font-weight:500}
+.kpi .val{font-family:var(--mono);font-size:clamp(21px,3.2vw,27px);font-weight:600;margin-top:8px;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums}
+.kpi .sub{font-size:11px;color:var(--muted);margin-top:6px;font-family:var(--mono)}
+.pos{color:var(--up)}.neg{color:var(--down)}
+section{margin-top:40px}
+.sec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.sec-head h2{font-size:19px;letter-spacing:-.01em;margin:0;font-weight:640}
+.sec-head .n{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.sec-note{color:var(--ink-2);margin:0 0 18px;max-width:72ch;font-size:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px;box-shadow:var(--shadow)}
+.grid2{display:grid;grid-template-columns:1.1fr .9fr;gap:16px}
+@media(max-width:820px){.grid2{grid-template-columns:1fr}}
+.card h3{margin:0 0 3px;font-size:15px;font-weight:600}
+.card .cap{margin:0 0 16px;font-size:13px;color:var(--ink-2)}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.axl{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+.vlab{font-family:var(--mono);font-size:11.5px;fill:var(--ink);font-variant-numeric:tabular-nums}
+.bar{transition:opacity .15s}.bar:hover{opacity:.72}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--ink-2);margin-top:12px}
+.legend span{display:inline-flex;align-items:center;gap:6px}.sw{width:14px;height:3px;border-radius:2px;display:inline-block}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{text-align:right;padding:9px 10px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums;font-family:var(--mono)}
+th{font-family:var(--sans);font-weight:600;color:var(--ink-2);font-size:12.5px;text-transform:uppercase;letter-spacing:.04em}
+td:first-child,th:first-child{text-align:left;font-family:var(--sans)}
+.hl{background:var(--accent-soft)}
+.note{background:var(--surface-2);border:1px solid var(--border);border-left:3px solid var(--warn);border-radius:11px;padding:13px 16px;margin-top:16px;font-size:13.5px;color:var(--ink-2)}
+.note b{color:var(--ink);font-weight:640}
+.foot{margin-top:48px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted);font-size:12.5px;line-height:1.6}
+.foot b{color:var(--ink-2)}
+</style>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Rosmerta · Strategy Backtest</p>
+    <h1>Buy the red Wednesday, hold two weeks</h1>
+    <p class="lede">Testing the entry-timing rule: when a name is in an uptrend (a stand-in for “my models are bullish”)
+      and it closes <b>down on a Wednesday</b>, buy that close and hold <b>10 trading days</b>. Event-driven over the
+      full book, net of costs, benchmarked against both a random-day entry and buy-and-hold.</p>
+    <div class="chips" id="chips"></div>
+  </header>
+
+  <div class="verdict">
+    <div class="vc yes"><span class="tag">✓ As an execution overlay</span>
+      <h3>Worth doing</h3>
+      <p id="v-yes"></p></div>
+    <div class="vc no"><span class="tag">✕ As a standalone system</span>
+      <h3>Don’t</h3>
+      <p id="v-no"></p></div>
+  </div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <section>
+    <div class="sec-head"><h2>Equity curve</h2><span class="n" id="eq-n"></span></div>
+    <p class="sec-note">Growth of $1 — the strategy run as an always-on equal-weight portfolio of every open position
+      (~45 names at a time, so effectively always invested) vs simply holding the whole 99-stock universe. The timing
+      overlay is a smoother but <b>lower</b> line: as a standalone book it trails plain buy-and-hold.</p>
+    <div class="card">
+      <svg id="eq" viewBox="0 0 960 360" role="img" aria-label="Equity curve strategy vs benchmark"></svg>
+      <div class="legend">
+        <span><i class="sw" style="background:var(--accent)"></i>Strategy (red-Wed timing)</span>
+        <span><i class="sw" style="background:var(--muted)"></i>Equal-weight buy &amp; hold</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Where the edge actually is</h2><span class="n">10-day forward return</span></div>
+    <p class="sec-note">The right question for how you’d use it: for a name you’re buying anyway, does waiting for the
+      red-Wednesday dip beat entering on an arbitrary day? Yes — by a small, statistically solid margin.</p>
+    <div class="grid2">
+      <div class="card">
+        <h3>Entry timing, same universe</h3>
+        <p class="cap">Avg 10-day return by entry condition (uptrend names only).</p>
+        <svg id="edge" viewBox="0 0 460 210" role="img" aria-label="Execution edge comparison"></svg>
+        <div class="note" id="edge-note"></div>
+      </div>
+      <div class="card">
+        <h3>Cost sensitivity</h3>
+        <p class="cap">Avg gross/net trade return by round-trip cost.</p>
+        <table id="cost-tbl"><thead><tr><th>Round-trip</th><th>Avg / trade</th><th>Win rate</th></tr></thead><tbody></tbody></table>
+        <div class="note">A ~<b>0.36%</b> per-trade edge comfortably survives retail costs — even 20 bps leaves most of it. Cost isn’t the killer here; regime is.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Stops &amp; the “insurance” question</h2><span class="n">net of 10 bps</span></div>
+    <p class="sec-note">You framed the dip entry as stop-loss insurance. Half true: you do get in lower — but a <b>tight
+      mechanical stop backfires</b>. This is a mean-reversion trade, so positions are meant to sag before they recover;
+      a −5% stop is hit on a third of trades and cuts winners short.</p>
+    <div class="grid2">
+      <div class="card">
+        <h3>Stop-loss variants</h3>
+        <p class="cap">Same signal, different exit rule.</p>
+        <table id="stop-tbl"><thead><tr><th>Rule</th><th>Avg / trade</th><th>Win</th><th>Worst</th><th>Hit</th></tr></thead><tbody></tbody></table>
+        <div class="note"><b>Give it room.</b> The insurance is the better entry basis, not a tight stop. If you must set one, put it below the typical dip (well past −4.4%), or size the position for that drawdown instead.</div>
+      </div>
+      <div class="card">
+        <h3>How deep trades dip before day 10</h3>
+        <p class="cap">Distribution of the worst intra-hold drawdown (MAE).</p>
+        <svg id="mae" viewBox="0 0 460 210" role="img" aria-label="Drawdown distribution"></svg>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>By year — the regime tell</h2><span class="n">avg gross return / trade</span></div>
+    <p class="sec-note">Positive every year except <b>2022</b>. The dip-buy is a bull/recovery tactic — it works when
+      dips get bought (2020, 2025) and stalls when they keep falling (2022’s bear).</p>
+    <div class="card"><svg id="years" viewBox="0 0 960 240" role="img" aria-label="Average return by year"></svg></div>
+  </section>
+
+  <footer class="foot" id="foot"></footer>
+</div>
+<script>
+const D=__DATA__;
+const SVG="http://www.w3.org/2000/svg";
+const el=(t,a={})=>{const n=document.createElementNS(SVG,t);for(const k in a)n.setAttribute(k,a[k]);return n;};
+const txt=(x,y,s,c,a={})=>{const n=el("text",{x,y,class:c,...a});n.textContent=s;return n;};
+const sgn=v=>(v>0?"+":"")+v;
+const S=D.stats,X=D.exec;
+
+document.getElementById("chips").innerHTML=[`<b>${S.n.toLocaleString()}</b> trades`,`99 stocks`,`2020–2026`,`10-day hold`,`entry on the close`].map(c=>`<span class="chip">${c}</span>`).join("");
+document.getElementById("v-yes").innerHTML=`For a name your models already like, entering on the red-Wednesday dip returns <b>${sgn(X.redwed)}%</b> over 10 days vs <b>${sgn(X.random)}%</b> for a random-day entry — a <b>${sgn(X.edge)}%</b> edge (t=${X.t}, p&lt;0.0001), ${S.win}% win rate, and it survives costs.`;
+document.getElementById("v-no").innerHTML=`Run as its own always-invested book it makes <b>${S.cagr}%</b> CAGR at Sharpe <b>${S.sharpe}</b> — <b>below</b> equal-weight buy-and-hold (${S.cagr_b}%, Sharpe ${S.sharpe_b}). The timing doesn’t beat just being long the universe.`;
+document.getElementById("kpis").innerHTML=[
+  {l:"Avg return / trade",v:sgn(S.net10)+"%",c:"pos",s:"net 10 bps · gross "+sgn(S.avg_trade)+"%"},
+  {l:"Win rate",v:S.win+"%",c:"",s:"of "+S.n.toLocaleString()+" trades"},
+  {l:"Execution edge",v:sgn(X.edge)+"%",c:"pos",s:"vs random entry · p<1e-4"},
+  {l:"Sharpe (vs B&H)",v:S.sharpe+" / "+S.sharpe_b,c:"",s:"strategy / buy-hold"},
+  {l:"Avg dip in hold",v:S.mae+"%",c:"neg",s:"median −3.2% (MAE)"},
+].map(k=>`<div class="kpi"><div class="lab">${k.l}</div><div class="val ${k.c}">${k.v}</div><div class="sub">${k.s}</div></div>`).join("");
+document.getElementById("eq-n").textContent=D.eq.dates[0]+" → "+D.eq.dates[D.eq.dates.length-1];
+
+// cost table
+document.querySelector("#cost-tbl tbody").innerHTML=D.costs.map(c=>`<tr class="${c.bps===10?'hl':''}"><td>${c.bps} bps</td><td class="pos">+${c.avg.toFixed(3)}%</td><td>${c.win}%</td></tr>`).join("");
+// stop table
+document.querySelector("#stop-tbl tbody").innerHTML=D.stops.map((s,i)=>`<tr class="${i===0?'hl':''}"><td>${s.lab}</td><td class="pos">+${s.avg.toFixed(3)}%</td><td>${s.win}%</td><td class="neg">${s.worst}%</td><td>${s.hit==null?'—':s.hit+'%'}</td></tr>`).join("");
+document.getElementById("edge-note").innerHTML=`Red-Wednesday beats a random uptrend-day entry by <b>${sgn(X.edge)}%</b> per trade. (A <i>green</i> Wednesday entry only makes ${sgn(X.green)}% — the dip is the signal.)`;
+
+// ---- equity curve ----
+(function(){const s=document.getElementById("eq"),W=960,H=360,L=52,R=64,T=16,B=34;
+ const ds=D.eq.dates,a=D.eq.strategy,b=D.eq.bench,pw=W-L-R,ph=H-T-B;
+ const max=Math.max(...a,...b),min=Math.min(...a,...b,1);
+ const x=i=>L+pw*i/(ds.length-1),y=v=>T+ph-((v-min)/(max-min))*ph;
+ for(let g=0;g<=4;g++){const gv=min+(max-min)*g/4,gy=y(gv);s.appendChild(el("line",{x1:L,x2:W-R,y1:gy,y2:gy,stroke:"var(--grid)","stroke-width":1}));s.appendChild(txt(L-8,gy+4,"$"+gv.toFixed(1),"axl",{"text-anchor":"end"}));}
+ // year ticks
+ let py=null;ds.forEach((d,i)=>{const yr=d.slice(0,4);if(yr!==py){py=yr;s.appendChild(txt(x(i),H-14,yr,"axl",{"text-anchor":"middle"}));s.appendChild(el("line",{x1:x(i),x2:x(i),y1:T,y2:T+ph,stroke:"var(--grid)","stroke-width":1,"stroke-dasharray":"2 4"}));}});
+ const path=arr=>arr.map((v,i)=>(i?"L":"M")+" "+x(i).toFixed(1)+" "+y(v).toFixed(1)).join(" ");
+ s.appendChild(el("path",{d:path(b),fill:"none",stroke:"var(--muted)","stroke-width":1.8,"stroke-linejoin":"round"}));
+ s.appendChild(el("path",{d:path(a),fill:"none",stroke:"var(--accent)","stroke-width":2.4,"stroke-linejoin":"round"}));
+ const lasti=ds.length-1;
+ [["var(--accent)",a[lasti],4],["var(--muted)",b[lasti],3]].forEach(([c,v,r])=>{s.appendChild(el("circle",{cx:x(lasti),cy:y(v),r,fill:c,stroke:"var(--surface)","stroke-width":2}));s.appendChild(txt(x(lasti)+8,y(v)+4,"$"+v.toFixed(1),"vlab",{fill:c}));});
+})();
+
+// ---- execution edge bars ----
+(function(){const s=document.getElementById("edge"),W=460,H=210,L=118,R=54,T=10,B=26;
+ const rows=[{n:"Red Wednesday",v:X.redwed,c:"var(--accent)"},{n:"Random uptrend day",v:X.random,c:"var(--muted)"},{n:"Green Wednesday",v:X.green,c:"var(--muted)"}];
+ const pw=W-L-R,rh=(H-T-B)/rows.length,max=Math.max(...rows.map(r=>r.v))*1.15;
+ for(let g=0;g<=3;g++){const gv=max*g/3,gx=L+pw*gv/max;s.appendChild(el("line",{x1:gx,x2:gx,y1:T,y2:T+rh*rows.length,stroke:"var(--grid)","stroke-width":1}));s.appendChild(txt(gx,H-10,"+"+gv.toFixed(1)+"%","axl",{"text-anchor":"middle"}));}
+ rows.forEach((r,i)=>{const by=T+i*rh+8,bh=Math.min(26,rh-14),w=pw*r.v/max;
+  s.appendChild(txt(L-10,by+bh/2+4,r.n,"vlab",{"text-anchor":"end",fill:"var(--ink)"}));
+  s.appendChild(el("rect",{class:"bar",x:L,y:by,width:w,height:bh,fill:r.c,rx:4}));
+  s.appendChild(txt(L+w+7,by+bh/2+4,"+"+r.v.toFixed(2)+"%","vlab"));});
+})();
+
+// ---- MAE distribution ----
+(function(){const s=document.getElementById("mae"),W=460,H=210,L=42,R=14,T=12,B=34;
+ const rows=[{n:">−3%",v:D.mae.d3},{n:">−5%",v:D.mae.d5},{n:">−8%",v:D.mae.d8},{n:">−10%",v:D.mae.d10}];
+ const pw=W-L-R,ph=H-T-B,gw=pw/rows.length,bw=Math.min(46,gw-18),max=60;
+ for(let g=0;g<=3;g++){const gv=max*g/3,gy=T+ph-(gv/max)*ph;s.appendChild(el("line",{x1:L,x2:W-R,y1:gy,y2:gy,stroke:"var(--grid)","stroke-width":1}));s.appendChild(txt(L-8,gy+4,gv.toFixed(0)+"%","axl",{"text-anchor":"end"}));}
+ rows.forEach((r,i)=>{const cx=L+gw*i+gw/2,bh=(r.v/max)*ph;
+  s.appendChild(el("rect",{class:"bar",x:cx-bw/2,y:T+ph-bh,width:bw,height:bh,fill:"var(--down)",rx:3,opacity:.85}));
+  s.appendChild(txt(cx,T+ph-bh-6,r.v.toFixed(0)+"%","vlab",{"text-anchor":"middle"}));
+  s.appendChild(txt(cx,H-12,r.n,"axl",{"text-anchor":"middle"}));});
+ s.appendChild(txt((L+W-R)/2,T,"share of trades dipping past…","axl",{"text-anchor":"middle"}));
+})();
+
+// ---- by year ----
+(function(){const s=document.getElementById("years"),W=960,H=240,L=44,R=14,T=18,B=34;
+ const rows=D.byyear,pw=W-L-R,ph=H-T-B,gw=pw/rows.length,bw=Math.min(70,gw-26);
+ const vals=rows.map(r=>r.avg),max=Math.max(...vals)*1.15,min=Math.min(-0.2,...vals)*1.2;
+ const Y=v=>T+ph-((v-min)/(max-min))*ph,zero=Y(0);
+ [min,0,max/2,max].map(v=>+v.toFixed(1)).filter((v,i,a)=>a.indexOf(v)===i).forEach(gv=>{const gy=Y(gv);s.appendChild(el("line",{x1:L,x2:W-R,y1:gy,y2:gy,stroke:gv===0?"var(--axis)":"var(--grid)","stroke-width":gv===0?1.4:1}));s.appendChild(txt(L-8,gy+4,sgn(gv.toFixed(1))+"%","axl",{"text-anchor":"end"}));});
+ rows.forEach((r,i)=>{const cx=L+gw*i+gw/2,c=r.avg>=0?"var(--up)":"var(--down)",yv=Y(r.avg),top=Math.min(yv,zero),bh=Math.abs(yv-zero);
+  s.appendChild(el("rect",{class:"bar",x:cx-bw/2,y:top,width:bw,height:Math.max(bh,1),fill:c,rx:4}));
+  s.appendChild(txt(cx,r.avg>=0?top-6:top+bh+14,sgn(r.avg.toFixed(2))+"%","vlab",{"text-anchor":"middle"}));
+  s.appendChild(txt(cx,H-14,r.y,"axl",{"text-anchor":"middle"}));
+  s.appendChild(txt(cx,H-2,r.win+"% win","axl",{"text-anchor":"middle","font-size":"9.5"}));});
+})();
+
+document.getElementById("foot").innerHTML=`<p><b>Method.</b> Universe = 99 stocks in <span style="font-family:var(--mono)">price_hourly</span>, daily bars from hourly (2020–2026). Signal: a Wednesday closing below Tuesday (“red”) while the close is above its 50-day SMA (uptrend = bullish-thesis proxy). Enter at that close, exit at the close 10 trading days later; ${S.n.toLocaleString()} trades. Equity curve = daily equal-weight of all open positions (~${S.avg_pos} at a time, ${S.inv}% time in market), 10 bps round-trip cost, vs equal-weight buy-and-hold of the same universe over the same window. Stops approximated from daily lows. Execution-edge test compares the signal’s 10-day return to all uptrend-day entries.</p><p><b>Caveats.</b> Equal-weight, long-only, no leverage; the uptrend filter is a crude stand-in for a real fundamental/indicator thesis, so live results depend on your selection; gross of slippage, borrow, taxes, and the market-impact of ~45 concurrent positions. Descriptive of this book over this window — not a forward guarantee.</p>`;
+</script>

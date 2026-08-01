@@ -1,0 +1,216 @@
+<title>Weekly Behaviour of the Book — Rosmerta</title>
+<style>
+:root{
+  --plane:#f4f5f2;--surface:#fbfbf9;--surface-2:#f0f1ed;--ink:#14161a;--ink-2:#565a52;--muted:#8a8d84;
+  --grid:#e4e5df;--axis:#c7c8c0;--border:rgba(20,22,26,.10);--accent:#2a5cbf;--accent-soft:#dfe8fa;
+  --bull2:#0a7d33;--bull1:#5aa960;--flat:#94978d;--bear1:#d9764c;--bear2:#c0392b;--up:#0a7d33;--down:#c0392b;
+  --shadow:0 1px 2px rgba(20,22,26,.05),0 8px 24px -12px rgba(20,22,26,.12);
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;--sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;}
+@media (prefers-color-scheme:dark){:root{
+  --plane:#0c0d0c;--surface:#171817;--surface-2:#1f201e;--ink:#f2f2ee;--ink-2:#b6b8ad;--muted:#84867c;
+  --grid:#2a2b28;--axis:#3a3b37;--border:rgba(255,255,255,.10);--accent:#6b9bf0;--accent-soft:#1d2740;
+  --bull2:#2ba24e;--bull1:#4f9a58;--flat:#9a988f;--bear1:#e2895f;--bear2:#e05043;--up:#2ba24e;--down:#e05043;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 30px -14px rgba(0,0,0,.7);}}
+:root[data-theme="light"]{--plane:#f4f5f2;--surface:#fbfbf9;--surface-2:#f0f1ed;--ink:#14161a;--ink-2:#565a52;--muted:#8a8d84;--grid:#e4e5df;--axis:#c7c8c0;--border:rgba(20,22,26,.10);--accent:#2a5cbf;--accent-soft:#dfe8fa;--bull2:#0a7d33;--bull1:#5aa960;--flat:#94978d;--bear1:#d9764c;--bear2:#c0392b;--up:#0a7d33;--down:#c0392b;}
+:root[data-theme="dark"]{--plane:#0c0d0c;--surface:#171817;--surface-2:#1f201e;--ink:#f2f2ee;--ink-2:#b6b8ad;--muted:#84867c;--grid:#2a2b28;--axis:#3a3b37;--border:rgba(255,255,255,.10);--accent:#6b9bf0;--accent-soft:#1d2740;--bull2:#2ba24e;--bull1:#4f9a58;--flat:#9a988f;--bear1:#e2895f;--bear2:#e05043;--up:#2ba24e;--down:#e05043;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased;font-size:15px}
+.wrap{max-width:1120px;margin:0 auto;padding:clamp(20px,4vw,52px) clamp(16px,3vw,32px) 72px}
+h1{font-size:clamp(26px,4vw,40px);line-height:1.08;letter-spacing:-.02em;margin:0;font-weight:680;text-wrap:balance}
+.lede{color:var(--ink-2);max-width:64ch;margin:14px 0 0;font-size:16px}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:600;margin:0 0 14px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:22px}
+.chip{font-family:var(--mono);font-size:12px;color:var(--ink-2);background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:5px 12px;white-space:nowrap}
+.chip b{color:var(--ink);font-weight:600}
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin:34px 0 8px}
+@media(max-width:820px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 16px 15px;box-shadow:var(--shadow)}
+.kpi .lab{font-size:12px;color:var(--ink-2);font-weight:500}
+.kpi .val{font-family:var(--mono);font-size:clamp(23px,3.4vw,30px);font-weight:600;margin-top:9px;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums}
+.kpi .sub{font-size:11.5px;color:var(--muted);margin-top:7px;font-family:var(--mono)}
+.pos{color:var(--up)}.neg{color:var(--down)}
+section{margin-top:44px}
+.sec-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.sec-head h2{font-size:20px;letter-spacing:-.01em;margin:0;font-weight:640}
+.sec-head .n{font-family:var(--mono);font-size:12px;color:var(--muted)}
+.sec-note{color:var(--ink-2);margin:0 0 20px;max-width:70ch;font-size:14.5px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px 22px 20px;box-shadow:var(--shadow)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:780px){.grid2{grid-template-columns:1fr}}
+.card h3{margin:0 0 3px;font-size:15px;font-weight:600}
+.card .cap{margin:0 0 18px;font-size:13px;color:var(--ink-2)}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.axl{font-family:var(--mono);font-size:11px;fill:var(--muted)}
+.vlab{font-family:var(--mono);font-size:11.5px;fill:var(--ink);font-variant-numeric:tabular-nums}
+.tlab{font-size:13px;fill:var(--ink);font-weight:500}
+.bar{transition:opacity .15s}.bar:hover{opacity:.72;cursor:default}
+.callout{display:flex;gap:14px;flex-wrap:wrap;margin-top:18px}
+.co{flex:1;min-width:150px;background:var(--surface-2);border:1px solid var(--border);border-radius:11px;padding:12px 14px}
+.co .cv{font-family:var(--mono);font-size:19px;font-weight:600}.co .ct{font-size:12.5px;color:var(--ink-2);margin-top:3px;line-height:1.35}
+.insight{background:linear-gradient(180deg,var(--accent-soft),transparent);border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:14px;padding:18px 20px;margin:0 0 22px}
+.insight p{margin:0;font-size:15px}.insight b{font-weight:640}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:780px){.split{grid-template-columns:1fr}}
+.panel{border:1px solid var(--border);border-radius:13px;padding:18px;background:var(--surface-2)}
+.panel .ph{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 4px;font-weight:600}
+.panel.rand .ph{color:var(--ink-2)}.panel.pred .ph{color:var(--accent)}
+.panel .pv{font-family:var(--mono);font-size:30px;font-weight:600;letter-spacing:-.02em;margin:6px 0 2px;line-height:1}
+.panel .pd{font-size:13.5px;color:var(--ink-2);margin:8px 0 0}
+.mini{display:flex;gap:10px;margin-top:14px}
+.mini .m{flex:1;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:9px;padding:9px 4px}
+.mini .mv{font-family:var(--mono);font-size:16px;font-weight:600}.mini .ml{font-size:10.5px;color:var(--muted);margin-top:2px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--ink-2);margin-top:14px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:11px;height:11px;border-radius:3px;display:inline-block}
+.foot{margin-top:52px;padding-top:20px;border-top:1px solid var(--border);color:var(--muted);font-size:12.5px;line-height:1.6}
+.foot b{color:var(--ink-2);font-weight:600}
+</style>
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Rosmerta · Price Behaviour Study</p>
+    <h1>What a week does to the book</h1>
+    <p class="lede" id="lede"></p>
+    <div class="chips" id="chips"></div>
+  </header>
+  <div class="kpis" id="kpis"></div>
+  <section>
+    <div class="sec-head"><h2>The distribution of a weekly move</h2><span class="n" id="n-weeks"></span></div>
+    <p class="sec-note">Each bar is a stock-week's Friday-to-Friday return. Read the shape, not just the centre: the peak, the tails, and how far the extremes reach.</p>
+    <div class="card"><svg id="hist" viewBox="0 0 920 300" role="img" aria-label="Histogram of weekly returns"></svg><div class="callout" id="dist-co"></div></div>
+  </section>
+  <section>
+    <div class="sec-head"><h2>Ways a week moves</h2><span class="n">by shape, share of all weeks</span></div>
+    <p class="sec-note">Each week classified by its net move and how far it travelled against you first (entry = the Friday close).</p>
+    <div class="card"><svg id="types" viewBox="0 0 920 250" role="img" aria-label="Movement types by share"></svg>
+      <div class="legend"><span><i class="sw" style="background:var(--bull2)"></i>bullish net</span><span><i class="sw" style="background:var(--flat)"></i>flat</span><span><i class="sw" style="background:var(--bear2)"></i>bearish net</span><span style="margin-left:auto;color:var(--muted)">bar = share · right = avg net · avg high-low range in ()</span></div></div>
+  </section>
+  <section>
+    <div class="sec-head"><h2>Inside the held week</h2><span class="n">entered at the Friday close</span></div>
+    <p class="sec-note" id="exc-note"></p>
+    <div class="grid2">
+      <div class="card"><h3>Cumulative return through the week</h3><p class="cap">Average path from the Friday entry, by each day's close.</p><svg id="path" viewBox="0 0 460 260" role="img" aria-label="Cumulative intraweek path"></svg></div>
+      <div class="card"><h3>When the week's high &amp; low print</h3><p class="cap">Share of weeks whose extreme falls on each weekday.</p><svg id="hilo" viewBox="0 0 460 260" role="img" aria-label="Weekday of weekly high and low"></svg>
+        <div class="legend" style="margin-top:10px"><span><i class="sw" style="background:var(--up)"></i>weekly high</span><span><i class="sw" style="background:var(--down)"></i>weekly low</span></div></div>
+    </div>
+  </section>
+  <section>
+    <div class="sec-head"><h2>Momentum vs volatility</h2><span class="n">what actually persists</span></div>
+    <div class="insight"><p id="insight"></p></div>
+    <div class="split">
+      <div class="panel rand"><p class="ph">Direction</p><div class="pv" id="p-acret"></div><p class="pd">Week-to-week return autocorrelation. Near zero means no momentum and no reliable reversal at the weekly horizon.</p><div class="mini" id="p-mini-dir"></div></div>
+      <div class="panel pred"><p class="ph">Volatility</p><div class="pv" id="p-acrange" style="color:var(--accent)"></div><p class="pd">Week-to-week <b>range</b> autocorrelation. High values mean turbulence clusters -- calm follows calm, chaos follows chaos.</p><div class="mini" id="p-mini-vol"></div></div>
+    </div>
+  </section>
+  <section>
+    <div class="sec-head"><h2>Calendar &amp; regime</h2><span class="n">seasonality and year-by-year</span></div>
+    <p class="sec-note">Where the drift concentrates across the year, and whether it held up year to year.</p>
+    <div class="grid2">
+      <div class="card"><h3>Average weekly return by month</h3><p class="cap">Mean Fri&#8594;Fri return of weeks ending in each month.</p><svg id="months" viewBox="0 0 460 260" role="img" aria-label="Average weekly return by month"></svg></div>
+      <div class="card"><h3>Average weekly return by year</h3><p class="cap">Mean return and % of weeks positive, per calendar year.</p><svg id="years" viewBox="0 0 460 260" role="img" aria-label="Average weekly return by year"></svg></div>
+    </div>
+  </section>
+  <footer class="foot" id="foot"></footer>
+</div>
+<script>
+const D=__DATA__;
+const SVG="http://www.w3.org/2000/svg";
+const el=(t,a={})=>{const n=document.createElementNS(SVG,t);for(const k in a)n.setAttribute(k,a[k]);return n;};
+const txt=(x,y,s,cls,a={})=>{const n=el("text",{x,y,class:cls,...a});n.textContent=s;return n;};
+const sgn=v=>(v>0?"+":"")+v;
+
+// header
+document.getElementById("lede").innerHTML=`Every stock-week measured <b>Friday close → Friday close</b> — the return you can actually trade, weekend gap included. Across ${D.meta.n_weeks.toLocaleString()} stock-weeks the average is <b>${sgn(D.dist.mean)}%</b> with a <b>${D.dist.range_mean}%</b> typical range; direction barely persists week to week while the <b>size</b> of the move clusters strongly.`;
+document.getElementById("chips").innerHTML=[
+  `<b>${D.meta.n_stocks}</b> stocks`,`<b>${D.meta.n_weeks.toLocaleString()}</b> stock-weeks`,
+  `${D.meta.start} – ${D.meta.end}`,`Fri-close → Fri-close`,
+  `${D.meta.list} · equal-weight`].map(c=>`<span class="chip">${c}</span>`).join("");
+document.getElementById("n-weeks").textContent=D.meta.n_weeks.toLocaleString()+" weeks";
+document.getElementById("kpis").innerHTML=D.kpis.map(k=>`<div class="kpi"><div class="lab">${k.lab}</div><div class="val ${k.cls}">${k.val}</div><div class="sub">${k.sub}</div></div>`).join("");
+
+// distribution callouts
+const di=D.dist;
+document.getElementById("dist-co").innerHTML=[
+  [`${sgn(di.skew)}`, di.skew>=0?"pos":"neg", "Skew — "+(di.skew>=0?"a right tail; big up-weeks outrun big down-weeks":"a left tail; big down-weeks dominate")],
+  [`${sgn(di.kurt)}`, "acc", "Excess kurtosis — "+(di.kurt>2?"fat tails; extremes far more likely than normal":"near-normal tails")],
+  [`${di.gt5}% / ${di.lt5}%`, "", "Weeks moving >+5% / <−5%"],
+  [`${di.min}% / ${sgn(di.max)}%`, "", "Worst and best single stock-weeks"],
+].map(([v,c,t])=>`<div class="co"><div class="cv ${c==='acc'?'':c}" ${c==='acc'?'style="color:var(--accent)"':''}>${v}</div><div class="ct">${t}</div></div>`).join("");
+document.getElementById("exc-note").innerHTML=`Shape of a typical hold: it tends to bottom early and top late, and most of the week's drift is banked by mid-week. The average week swings <b>${sgn(di.mfe_avg)}%</b> above and <b>${di.mae_avg}%</b> below your entry before settling near flat — so a tight stop gets tagged by noise almost every week.`;
+
+// predictability panels
+const p=D.predict;
+document.getElementById("p-acret").textContent=sgn(p.ac_ret);
+document.getElementById("p-acrange").textContent=sgn(p.ac_range);
+document.getElementById("insight").innerHTML=`<b>${Math.abs(p.ac_ret)<0.1?"Direction doesn't persist — size does.":"Direction shows a weak signal; size persists far more strongly."}</b> Last week's direction tells you little about this week (autocorrelation ${sgn(p.ac_ret)}), but last week's <b>range</b> strongly predicts this week's (${sgn(p.ac_range)}). If you can't forecast direction, you can at least forecast turbulence — and size to it.`;
+const mini=(id,rows)=>document.getElementById(id).innerHTML=rows.map(([v,l,c])=>`<div class="m"><div class="mv ${c||''}">${v}</div><div class="ml">${l}</div></div>`).join("");
+mini("p-mini-dir",[[`~${p.ext_up}%`,"up-streak extends",""],[`~${p.ext_dn}%`,"down-streak extends",""],[`${sgn(p.crash_bounce)}%`,"bounce after crash week",p.crash_bounce>0?"pos":"neg"]]);
+mini("p-mini-vol",[[`${p.range_hi}%`,"range after high-vol wk",""],[`${p.range_lo}%`,"range after calm wk",""],[`${p.range_avg}%`,"typical range",""]]);
+
+document.getElementById("foot").innerHTML=`<p><b>Method.</b> Hourly regular-hours bars from the rosmerta Postgres (<span style="font-family:var(--mono)">price_hourly</span>, ${D.meta.n_stocks} tickers${D.meta.list==='all stocks'?'':', '+D.meta.list+' list'}) rolled to daily then ISO weeks. Weekly return = last-trading-day close ÷ prior week's last-trading-day close − 1, keeping consecutive weeks (5–10 days apart) with ≥3 trading days. Movement types are mutually exclusive, from net return and max adverse/favourable excursion. Generated ${D.meta.generated}.</p><p><b>Caveats.</b> Equal-weight pool (not an index); the window is dominated by whatever regimes it spans; returns are gross of costs, borrow, and slippage. Descriptive of this book over this window — not a forward guarantee.</p>`;
+
+// ---- Histogram ----
+(function(){const s=document.getElementById("hist"),W=920,H=300,L=44,R=16,T=14,B=42;
+ const h=D.hist.h,e=D.hist.e,per=D.hist.n/100,pw=W-L-R,ph=H-T-B,nb=h.length,max=Math.max(...h);
+ const x=i=>L+i*(pw/nb),y=v=>T+ph-(v/max)*ph;
+ for(let g=0;g<=4;g++){const gv=max*g/4,gy=y(gv);s.appendChild(el("line",{x1:L,x2:W-R,y1:gy,y2:gy,stroke:"var(--grid)","stroke-width":1}));s.appendChild(txt(L-8,gy+4,(gv/per).toFixed(0)+"%","axl",{"text-anchor":"end"}));}
+ s.appendChild(txt(L-8,T-2,"share","axl",{"text-anchor":"end"}));
+ h.forEach((v,i)=>{const mid=(e[i]+e[i+1])/2;const col=(mid>=-5&&mid<=5)?"var(--accent)":(mid<-5?"var(--bear2)":"var(--bull2)");
+  const r=el("rect",{class:"bar",x:x(i)+.6,y:y(v),width:(pw/nb)-1.2,height:T+ph-y(v),fill:col,rx:1.5,opacity:(mid<-5||mid>5)?.92:.8});
+  r.appendChild(el("title")).textContent=`${e[i]}%…${e[i+1]}% : ${v.toLocaleString()} weeks`;s.appendChild(r);});
+ const xm=L+((D.hist.mean+20)/40)*pw;s.appendChild(el("line",{x1:xm,x2:xm,y1:T-2,y2:T+ph,stroke:"var(--ink)","stroke-width":1.5}));
+ s.appendChild(txt(xm+5,T+8,`mean ${sgn(D.hist.mean)}%`,"vlab"));
+ [-20,-15,-10,-5,0,5,10,15,20].forEach(t=>{const xx=L+((t+20)/40)*pw;s.appendChild(txt(xx,H-20,(t>0?"+":"")+t+"%","axl",{"text-anchor":"middle"}));});
+ s.appendChild(txt(W/2,H-4,"weekly return (clipped at ±20%)","axl",{"text-anchor":"middle"}));})();
+
+// ---- Movement types ----
+(function(){const s=document.getElementById("types"),W=920,H=250,L=150,R=210,T=8,B=8;
+ const rows=D.types,rh=(H-T-B)/rows.length,pw=W-L-R,max=Math.max(...rows.map(r=>r.share));
+ rows.forEach((r,i)=>{const cy=T+i*rh,bh=Math.min(30,rh-16),by=cy+(rh-bh)/2,w=(r.share/max)*pw;
+  s.appendChild(txt(L-12,by+bh/2+4,r.name,"tlab",{"text-anchor":"end"}));
+  const rect=el("rect",{class:"bar",x:L,y:by,width:w,height:bh,fill:r.c,rx:4});
+  rect.appendChild(el("title")).textContent=`${r.name}: ${r.share}% · avg net ${sgn(r.net)}% · avg range ${r.rng}%`;s.appendChild(rect);
+  s.appendChild(txt(L+w+10,by+bh/2+4,r.share.toFixed(1)+"%","vlab"));
+  const nc=r.net>0.2?"var(--up)":r.net<-0.2?"var(--down)":"var(--muted)";
+  const g=el("text",{x:L+w+58,y:by+bh/2+4,class:"vlab",fill:nc});g.textContent=`${sgn(r.net.toFixed(2))}% net`;s.appendChild(g);
+  s.appendChild(txt(W-8,by+bh/2+4,`range ${r.rng}%`,"axl",{"text-anchor":"end"}));});})();
+
+// ---- Path ----
+(function(){const s=document.getElementById("path"),W=460,H=260,L=48,R=18,T=18,B=40;
+ const pts=D.path,pw=W-L-R,ph=H-T-B,max=Math.max(0.3,...pts.map(p=>p.v))*1.15,min=Math.min(0,...pts.map(p=>p.v));
+ const x=i=>L+(pw/(pts.length-1))*i,y=v=>T+ph-((v-min)/(max-min))*ph;
+ for(let g=0;g<=3;g++){const gv=min+(max-min)*g/3,gy=y(gv);s.appendChild(el("line",{x1:L,x2:W-R,y1:gy,y2:gy,stroke:"var(--grid)","stroke-width":1}));s.appendChild(txt(L-8,gy+4,sgn(gv.toFixed(2))+"%","axl",{"text-anchor":"end"}));}
+ let dp=`M ${x(0)} ${y(pts[0].v)}`;pts.forEach((p,i)=>{if(i)dp+=` L ${x(i)} ${y(p.v)}`;});
+ const grad=el("linearGradient",{id:"pg",x1:0,y1:0,x2:0,y2:1});grad.appendChild(el("stop",{offset:0,"stop-color":"var(--accent)","stop-opacity":.22}));grad.appendChild(el("stop",{offset:1,"stop-color":"var(--accent)","stop-opacity":0}));
+ s.appendChild(el("defs")).appendChild(grad);
+ s.appendChild(el("path",{d:dp+` L ${x(pts.length-1)} ${y(min)} L ${x(0)} ${y(min)} Z`,fill:"url(#pg)"}));
+ s.appendChild(el("path",{d:dp,fill:"none",stroke:"var(--accent)","stroke-width":2.5,"stroke-linejoin":"round","stroke-linecap":"round"}));
+ pts.forEach((p,i)=>{const last=i===pts.length-1;s.appendChild(el("circle",{cx:x(i),cy:y(p.v),r:last?5:3.6,fill:"var(--accent)",stroke:"var(--surface)","stroke-width":2}));
+  s.appendChild(txt(x(i),H-16,p.d,"axl",{"text-anchor":"middle"}));if(i===0||i===2||last)s.appendChild(txt(x(i),y(p.v)-11,sgn(p.v.toFixed(2))+"%","vlab",{"text-anchor":"middle"}));});})();
+
+// ---- Hi/Lo ----
+(function(){const s=document.getElementById("hilo"),W=460,H=260,L=40,R=12,T=14,B=40;
+ const rows=D.hilo,pw=W-L-R,ph=H-T-B,max=Math.max(...rows.flatMap(r=>[r.hi,r.lo]))*1.12,gw=pw/rows.length,bw=Math.min(15,gw/2-4);
+ for(let g=0;g<=3;g++){const gv=max*g/3,gy=T+ph-(gv/max)*ph;s.appendChild(el("line",{x1:L,x2:W-R,y1:gy,y2:gy,stroke:"var(--grid)","stroke-width":1}));s.appendChild(txt(L-8,gy+4,gv.toFixed(0)+"%","axl",{"text-anchor":"end"}));}
+ rows.forEach((r,i)=>{const cx=L+gw*i+gw/2;[[r.hi,"var(--up)",-1],[r.lo,"var(--down)",1]].forEach(([v,c,side])=>{const bx=cx+side*2+(side<0?-bw:0),bh=(v/max)*ph;
+  const rect=el("rect",{class:"bar",x:bx,y:T+ph-bh,width:bw,height:bh,fill:c,rx:3});rect.appendChild(el("title")).textContent=`${r.d} — ${side<0?"high":"low"} on ${v}% of weeks`;s.appendChild(rect);});
+  s.appendChild(txt(cx,H-16,r.d,"axl",{"text-anchor":"middle"}));});})();
+
+// ---- diverging bars (months, years) ----
+function diverging(id,rows,key,lab,fmt,fs){const s=document.getElementById(id),W=460,H=260,L=40,R=14,T=18,B=40;
+ const pw=W-L-R,ph=H-T-B,gw=pw/rows.length,bw=Math.min(id==='years'?30:20,gw-(id==='years'?14:8));
+ const vals=rows.map(r=>r[key]),max=Math.max(0.1,...vals)*1.15,min=Math.min(-0.1,...vals)*1.15;
+ const Y=v=>T+ph-((v-min)/(max-min))*ph,zero=Y(0);
+ const ticks=[min,min+(max-min)/3,min+2*(max-min)/3,max].map(t=>+t.toFixed(1));
+ [...new Set(ticks)].forEach(gv=>{const gy=Y(gv);s.appendChild(el("line",{x1:L,x2:W-R,y1:gy,y2:gy,stroke:gv===0?"var(--axis)":"var(--grid)","stroke-width":gv===0?1.4:1}));s.appendChild(txt(L-8,gy+4,sgn(gv.toFixed(1)),"axl",{"text-anchor":"end"}));});
+ s.appendChild(el("line",{x1:L,x2:W-R,y1:zero,y2:zero,stroke:"var(--axis)","stroke-width":1.4}));
+ rows.forEach((r,i)=>{const cx=L+gw*i+gw/2,v=r[key],c=v>=0?"var(--up)":"var(--down)",yv=Y(v),top=Math.min(yv,zero),bh=Math.abs(yv-zero);
+  const rect=el("rect",{class:"bar",x:cx-bw/2,y:top,width:bw,height:Math.max(bh,1),fill:c,rx:3});rect.appendChild(el("title")).textContent=lab(r);s.appendChild(rect);
+  if(fmt)s.appendChild(txt(cx,v>=0?top-6:top+bh+13,sgn(v.toFixed(2)),"vlab",{"text-anchor":"middle","font-size":"10"}));
+  s.appendChild(txt(cx,H-16,r[fs.k],"axl",{"text-anchor":"middle","font-size":fs.s}));});}
+diverging("months",D.months,"v",0,false,{k:"m",s:"9.5"});
+document.querySelectorAll('#months text').forEach(()=>{});
+diverging("years",D.years,"v",r=>`${r.y}: ${sgn(r.v)}% avg · ${r.up}% weeks up`,true,{k:"y",s:"10"});
+document.getElementById("months").querySelectorAll("title");
+// month tooltips
+(function(){const t=document.getElementById("months").querySelectorAll("rect");D.months.forEach((r,i)=>{if(t[i]){const ti=el("title");ti.textContent=`${r.m}: ${sgn(r.v)}% avg weekly return`;t[i].appendChild(ti);}});})();
+</script>

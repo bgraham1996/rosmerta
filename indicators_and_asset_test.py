@@ -8,7 +8,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 
-ticker = 'PFE'
+ticker = 'AMD'
 
 db_config = get_db_config()
 
@@ -29,7 +29,8 @@ with connection as conn:
 print(pfe._prices_cache.head(5))
 
 # next need to test indicator implementaion
-
+print("==================================")
+print("=========  sma50  ================")
 with connection as conn:
     sma50 = Indicator('sma', window=50)
     pfe.add_indicator(sma50, conn)
