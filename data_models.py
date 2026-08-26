@@ -18,12 +18,12 @@ Two classes:
 Dates are passed as ``'%Y-%m-%d %H:%M:%S'`` strings and treated as UTC.
 """
 
-from pandas import DataFrame, concat, cut, merge
+from pandas import DataFrame, cut, merge
 from datetime import datetime as dt
 from datetime import timezone
 import numpy as np
 
-from utils.bars import RESAMPLE_RULES, VALID_TIMEFRAMES, resample_ohlcv
+from utils.bars import RESAMPLE_RULES, resample_ohlcv
 
 class Asset:
     """Price/fundamental analysis for a single ticker over a date window.
@@ -68,7 +68,6 @@ class Asset:
             self._dates_cache = None
             self._growth_cache = None
             self._levels_cache = None
-            print(f"Asset Object {self.asset_id} initialised")
 
     def get_prices(self, conn):
         """Load (and cache) OHLCV bars for this asset's window.
@@ -110,9 +109,9 @@ class Asset:
         """
         if self._prices_cache is None:
             raise ValueError(f"No prices available for {self.asset_id}")
-        else:
+        if self._dates_cache is None:
             self._dates_cache = self._prices_cache['timestamp'].to_list()
-            return self._dates_cache
+        return self._dates_cache
 
     def get_growth(self):
         """Per-bar close-to-close percent change.
@@ -142,10 +141,7 @@ class Asset:
         prices = self.get_prices(conn)
         if indicator.key in self._indicators:
             return self._indicators[indicator.key]
-        if isinstance(source, list):
-            input_data = prices[source]
-        else:
-            input_data = prices[source]
+        input_data = prices[source]
         indicator.compute(input_data)
         self._indicators[indicator.key] = indicator
         return indicator
@@ -251,10 +247,12 @@ class Asset:
     def get_price_levels(self, split = 1000):
         """Volume-by-price profile across ``split`` evenly spaced price bins.
 
-        Bins each bar's ``avg_price`` between the window low and high, then
-        aggregates ``volume`` (sum) and bar ``time`` (count) per bin, adding the
-        bin midpoint ``price`` and a ``density`` (volume * time) column. Computes
-        ``avg_price``/``stats`` first if needed. Returns (and caches) the
+        Bins each bar's ``avg_price`` between the min and max ``avg_price`` over
+        the window, then aggregates ``volume`` (sum) and bar ``time`` (count)
+        per bin, adding the bin midpoint ``price`` and a ``density``
+        (volume * time) column. Computes ``avg_price`` first if needed. Binning
+        over the ``avg_price`` range (rather than the close range) keeps every
+        bar inside the edges, so no volume is dropped. Returns (and caches) the
         resulting DataFrame indexed by price interval.
         """
         if self._levels_cache is None:
@@ -263,12 +261,10 @@ class Asset:
             else:
                 if 'avg_price' not in self._prices_cache.columns:
                     self.calc_bar_avg_price()
-                remove_stats = False
-                if self._stats_cache is None:
-                    self.get_stats()
 
-                low = self._stats_cache['low']
-                high = self._stats_cache['high']
+                avg_price = self._prices_cache['avg_price']
+                low = avg_price.min()
+                high = avg_price.max()
 
                 edges = np.linspace(low, high, split + 1)
                 bins = cut(self._prices_cache['avg_price'], bins = edges, include_lowest = True)
@@ -338,6 +334,10 @@ class Market:
         stock_list: Watchlist name in ``watchlist_members.list_name``.
         timeframe: Passed through to each ``Asset``.
     """
+    #: Fields a panel / market-stat can be built for. ``avg_price`` is derived
+    #: from OHLC on demand; the rest come straight off the price frame.
+    PANEL_FIELDS = ('open', 'high', 'low', 'close', 'volume', 'avg_price')
+
     def __init__(self, conn, start_date, end_date, stock_list = 'core', timeframe = 'hourly'):
         self.timeframe = timeframe
         self.stock_list = stock_list
@@ -345,24 +345,8 @@ class Market:
         self.end_date = end_date
         self.assets = {}
         self.market_id = f"{stock_list}-{start_date}-{end_date}-{timeframe}"
-        self._panels_cache = {
-            'open': None,
-            'high': None,
-            'low': None,
-            'close': None,
-            'volume': None,
-            'avg_price': None,
-            'period_pct_change': None
-        }
-        self._market_stats = {
-            'open': None,
-            'high': None,
-            'low': None,
-            'close': None,
-            'volume': None,
-            'avg_price': None,
-            'period_pct_change': None
-        }
+        self._panels_cache = {field: None for field in self.PANEL_FIELDS}
+        self._market_stats = {field: None for field in self.PANEL_FIELDS}
 
 
         with conn.cursor() as cur:
@@ -386,9 +370,9 @@ class Market:
 
     def populate_assets(self, conn):
         """Load prices and growth into every seeded asset."""
-        for key, value in self.assets.items():
-            value.get_prices(conn)
-            value.get_growth()
+        for asset in self.assets.values():
+            asset.get_prices(conn)
+            asset.get_growth()
         return True
 
     def get_growth(self, conn, clear_price_cache = False):
@@ -397,11 +381,11 @@ class Market:
         Loads prices then growth for each asset. If ``clear_price_cache`` is
         True, drops each asset's price cache afterwards to save memory.
         """
-        for key, value in self.assets.items():
-            value.get_prices(conn)
-            value.get_growth()
+        for asset in self.assets.values():
+            asset.get_prices(conn)
+            asset.get_growth()
             if clear_price_cache is True:
-                value.clear_price_cache()
+                asset.clear_price_cache()
         return True
 
     def get_panel(self, conn, field = 'close'):
@@ -411,56 +395,55 @@ class Market:
         and one column per symbol, holding that symbol's ``field`` value at each
         timestamp (outer-aligned on the union of all assets' dates, left-merged
         so missing bars are NaN). ``field`` must be one of
-        open/high/low/close/volume/avg_price.
+        open/high/low/close/volume/avg_price (``avg_price`` is derived per bar).
         """
-        cols = ['open', 'high', 'low', 'close', 'volume', 'avg_price']
-        if field not in cols:
+        if field not in self.PANEL_FIELDS:
             raise ValueError(f"Invalid field: {field} for market object: {self.market_id}")
-        else:
-            if self._panels_cache[field] is None:
-                dates = set()
-                for symbol in self.assets:
-                    dates.update(self.assets[symbol].get_dates())
-                panel = DataFrame({'timestamp': sorted(dates)})
-                keep_cols = ['timestamp', field]
-                for symbol in list(self.assets.keys()):
-                    data = self.assets[symbol].get_prices(conn)
-                    data = data[keep_cols]
-                    data = data.rename(columns={field: symbol})
-                    panel = merge(panel, data, on = 'timestamp', how = 'left')
-                self._panels_cache[field] = panel
-                return self._panels_cache[field]
-            else: 
-                return self._panels_cache[field]
-                   
+        if self._panels_cache[field] is None:
+            dates = set()
+            for symbol in self.assets:
+                dates.update(self.assets[symbol].get_dates())
+            panel = DataFrame({'timestamp': sorted(dates)})
+            for symbol in self.assets:
+                asset = self.assets[symbol]
+                data = asset.get_prices(conn)
+                if field == 'avg_price' and 'avg_price' not in data.columns:
+                    asset.calc_bar_avg_price()
+                data = data[['timestamp', field]].rename(columns={field: symbol})
+                panel = merge(panel, data, on = 'timestamp', how = 'left')
+            self._panels_cache[field] = panel
+        return self._panels_cache[field]
+
+
     def remove_panel(self, field):
         """Invalidate the cached panel for ``field``."""
         self._panels_cache[field] = None
         return True
 
-    def get_market_stats(self, conn, agg_option = 'close', clear_price_cache = False):
+    def get_market_stats(self, conn, agg_option = 'close'):
         """Cross-sectional stats across symbols for one field.
 
-        Intended to reduce the ``agg_option`` panel to a per-timestamp summary
-        of ``avg``/``count``/``std`` taken across all symbols, cached in
-        ``self._market_stats[agg_option]``.
+        Reduces the ``agg_option`` panel to a per-timestamp summary of
+        ``avg``/``count``/``std`` taken across the symbol columns, cached in
+        ``self._market_stats[agg_option]``. The panel is built on demand if it
+        has not been already. ``agg_option`` must be one of ``PANEL_FIELDS``.
 
-        Note: still under development — building this out is the current
-        work-in-progress on ``Market`` (the panel must be populated first via
-        ``get_panel``).
+        ``avg``/``count``/``std`` are all computed from the symbol columns
+        alone: ``avg`` is the cross-sectional mean, ``count`` the number of
+        symbols with a bar at that timestamp, ``std`` the cross-sectional
+        standard deviation.
         """
-        if self._panels_cache is None:
-            self.get_panel(conn, 'agg_option')
-        else:
-            data = self._panels_cache[agg_option].copy()
-
-            data['avg'] = data.mean(axis=1, numeric_only=True)
-            data['count'] = data.count(axis=1, numeric_only=True)
-            data['std'] = data.std(axis=1, numeric_only=True)
-
-            cols = ['timestamp', 'avg', 'count', 'std']
-            data = data[cols]
-        self._market_stats[agg_option] = data
+        if agg_option not in self.PANEL_FIELDS:
+            raise ValueError(f"Invalid field: {agg_option} for market object: {self.market_id}")
+        if self._market_stats[agg_option] is None:
+            panel = self.get_panel(conn, agg_option)
+            symbols = [col for col in panel.columns if col != 'timestamp']
+            values = panel[symbols]
+            stats = DataFrame({'timestamp': panel['timestamp']})
+            stats['avg'] = values.mean(axis=1)
+            stats['count'] = values.count(axis=1)
+            stats['std'] = values.std(axis=1)
+            self._market_stats[agg_option] = stats
         return self._market_stats[agg_option]
 
     def add_indicators(self, conn, indicator, source='close'):

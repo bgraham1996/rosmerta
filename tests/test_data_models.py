@@ -119,12 +119,10 @@ def test_get_price_levels(conn, date_bounds):
     a.get_prices(conn)
     levels = a.get_price_levels(split=4)
     assert {"volume", "time", "price", "density"} <= set(levels.columns)
-    # NOTE: bins are built over the close min/max but applied to each bar's
-    # avg_price. Bar 0's avg_price (10.25) sits below the close low (10.5), so it
-    # falls outside every bin and is dropped — only 4 of the 5 bars are counted.
-    # (Surfaced as a likely latent bug; this asserts current behaviour.)
-    assert levels["time"].sum() == 4
-    assert levels["volume"].sum() == pytest.approx(900.0)  # 1000 - bar0's 100
+    # Bins are built over the avg_price min/max (the same series being binned),
+    # so every bar lands in a bin — all 5 bars and their full volume are counted.
+    assert levels["time"].sum() == 5
+    assert levels["volume"].sum() == pytest.approx(1000.0)
     assert (levels["density"] == levels["volume"] * levels["time"]).all()
 
 
@@ -247,6 +245,20 @@ def test_market_get_panel(market_db, date_bounds):
     assert m.get_panel(conn, "close") is panel
 
 
+def test_market_get_panel_avg_price(market_db, date_bounds):
+    start, end = date_bounds
+    conn = market_db.conn()
+    m = Market(conn, start, end, stock_list="core")
+    m.seed_assets(conn)
+    m.populate_assets(conn)
+    # avg_price is derived per bar on demand — the panel must build without a
+    # pre-existing avg_price column on the price frames.
+    panel = m.get_panel(conn, "avg_price")
+    assert {"ACME", "BETA"} <= set(panel.columns)
+    # ACME bar 0: mean(10.0, 11.0, 9.5, 10.5) = 10.25
+    assert panel["ACME"].iloc[0] == pytest.approx((10.0 + 11.0 + 9.5 + 10.5) / 4)
+
+
 def test_market_get_panel_invalid_field(market_db, date_bounds):
     start, end = date_bounds
     conn = market_db.conn()
@@ -265,12 +277,15 @@ def test_market_get_market_stats(market_db, date_bounds):
     m.get_panel(conn, "close")
     stats = m.get_market_stats(conn, agg_option="close")
     assert list(stats.columns) == ["timestamp", "avg", "count", "std"]
-    # `avg` is computed over the symbol columns before any are mutated, so it is
-    # correct: ACME=10.5, BETA=20.5 → 15.5 at the first timestamp.
+    # `avg` is the cross-sectional mean over the symbol columns:
+    # ACME=10.5, BETA=20.5 → 15.5 at the first timestamp.
     assert stats["avg"].iloc[0] == pytest.approx((10.5 + 20.5) / 2)
-    # KNOWN BUG (get_market_stats is WIP): `count` is computed *after* the `avg`
-    # column has been appended, so it counts avg too — inflating every count by 1.
-    # First timestamp has 2 real symbols present → reported as 3; the last two
-    # timestamps have only ACME → reported as 2.
-    assert stats["count"].iloc[0] == 3
-    assert stats["count"].iloc[-1] == 2
+    # `count`/`std` are computed from the symbol columns alone (avg/std are no
+    # longer polluted by the appended avg column). The first timestamp has both
+    # symbols present → 2; the last two timestamps have only ACME → 1.
+    assert stats["count"].iloc[0] == 2
+    assert stats["count"].iloc[-1] == 1
+    # cross-sectional std at the first timestamp, over {10.5, 20.5}
+    assert stats["std"].iloc[0] == pytest.approx(pd.Series([10.5, 20.5]).std())
+    # cached per field
+    assert m.get_market_stats(conn, agg_option="close") is stats

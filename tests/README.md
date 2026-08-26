@@ -34,14 +34,19 @@ live, populated PostgreSQL** — they are integration/diagnostic tools, not pyte
 tests, and are excluded from collection via `testpaths` in `pyproject.toml`. Run
 them directly (e.g. `uv run market_test.py`) against a real DB.
 
-## Known bugs surfaced by these tests
+## Fixed bugs (previously surfaced here)
 
-- `Asset.get_price_levels` builds price bins over the **close** min/max but bins
-  each bar's **avg_price**, so bars whose `avg_price` falls outside the close
-  range are silently dropped (undercounting volume).
-- `Market.get_market_stats` (WIP) computes `count`/`std` *after* appending the
-  `avg` column, so those aggregations include `avg` itself — inflating `count`
-  by 1 and polluting `std`.
+These two were once pinned as "known bugs" in the assertions; both are now
+fixed and the tests assert the correct behaviour:
+
+- `Asset.get_price_levels` used to build price bins over the **close** min/max
+  while binning each bar's **avg_price**, silently dropping bars whose
+  `avg_price` fell outside the close range. It now bins over the `avg_price`
+  min/max, so every bar is counted.
+- `Market.get_market_stats` used to compute `count`/`std` *after* appending the
+  `avg` column, so those aggregations included `avg` itself (inflating `count`
+  by 1 and polluting `std`). It now computes all three from the symbol columns
+  alone.
 
 `Market.populate_assets` previously called `Asset.get_growth(conn)` against a
 zero-arg signature (guaranteed `TypeError`); that one-line typo was fixed.

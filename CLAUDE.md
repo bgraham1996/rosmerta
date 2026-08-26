@@ -145,10 +145,11 @@ There are two distinct kinds of tests, kept separate on purpose:
   (`Agg`) backend. They are **excluded from pytest collection** via `testpaths`; run them
   directly, e.g. `uv run market_test.py`, against a real DB.
 
-The pytest suite documents two known behavioural bugs it surfaced (pinned, not fixed):
-`Asset.get_price_levels` bins `avg_price` over the close min/max (dropping out-of-range bars), and
-the WIP `Market.get_market_stats` includes its own freshly-added `avg` column when computing
-`count`/`std`. See `tests/README.md`.
+The pytest suite previously pinned two behavioural bugs it surfaced; both are now fixed and the
+suite asserts the correct behaviour: `Asset.get_price_levels` bins `avg_price` over the
+`avg_price` min/max (so no out-of-range bars are dropped), and `Market.get_market_stats` computes
+`count`/`std` from the symbol columns alone (no longer polluted by the `avg` column). See
+`tests/README.md`.
 
 ## Conventions
 
