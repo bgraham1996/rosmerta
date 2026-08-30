@@ -152,8 +152,34 @@ class Asset:
         return self._indicators.get(key)
 
     def clear_price_cache(self):
-        """Drop the cached price frame so the next ``get_prices`` re-queries."""
+        """Drop the cached price frame and everything derived from it.
+
+        Nulls ``_prices_cache`` and cascades to the caches computed off the
+        price frame (dates, growth, levels, stats), so the next ``get_*`` call
+        recomputes against freshly loaded bars instead of serving stale results
+        aligned to the old frame. (The in-place ``avg_price`` column goes with
+        the frame, so a re-fetch starts clean.)
+        """
         self._prices_cache = None
+        self.clear_dates()
+        self.clear_growth()
+        self.clear_levels()
+        self.clear_stats()
+        return True
+
+    def clear_dates(self):
+        """Drop the cached timestamp list so the next ``get_dates`` recomputes."""
+        self._dates_cache = None
+        return True
+
+    def clear_growth(self):
+        """Drop the cached growth frame so the next ``get_growth`` recomputes."""
+        self._growth_cache = None
+        return True
+
+    def clear_levels(self):
+        """Drop the cached price levels so the next ``get_price_levels`` recomputes."""
+        self._levels_cache = None
         return True
 
     def calc_bar_avg_price(self):
@@ -325,8 +351,14 @@ class Market:
         market.get_panel(conn, 'close')        # symbol-by-timestamp matrix
         market.get_market_stats(conn, 'close') # avg/count/std across symbols
 
+        market.add_indicators(conn, Indicator('ema', window=20))  # apply to all
+        market.get_indicator_panel(conn, 'ema', window=20)        # its panel
+
     Panels and market stats are cached per field in ``self._panels_cache`` /
     ``self._market_stats``; ``remove_panel(field)`` invalidates a panel.
+    Indicators applied across the market are recorded in ``self._indicators``
+    ({key: source}) and their cross-sectional panels cached in
+    ``self._indicator_panels`` (keyed by indicator ``key``).
 
     Args:
         conn: Open psycopg2 connection.
@@ -347,6 +379,10 @@ class Market:
         self.market_id = f"{stock_list}-{start_date}-{end_date}-{timeframe}"
         self._panels_cache = {field: None for field in self.PANEL_FIELDS}
         self._market_stats = {field: None for field in self.PANEL_FIELDS}
+        # Indicators applied across every asset: {indicator key: source} plus a
+        # per-key cache of the cross-sectional (timestamp x symbol) result panel.
+        self._indicators = {}
+        self._indicator_panels = {}
 
 
         with conn.cursor() as cur:
@@ -449,15 +485,70 @@ class Market:
     def add_indicators(self, conn, indicator, source='close'):
         """Apply an indicator to every asset in the market.
 
-        Each asset gets its own copy of ``indicator`` (same name + params):
-        ``Indicator.compute`` caches its result on the instance, so sharing
-        one instance would give every asset the first asset's values.
+        ``indicator`` is an :class:`~indicators.Indicator` instance; each asset
+        gets its own fresh copy with the same name + params (``Indicator.compute``
+        caches its result on the instance, so a shared instance would give every
+        asset the first asset's values). The indicator's ``key`` and the ``source``
+        it was computed from are recorded on the market so the cross-sectional
+        result can be assembled later via :meth:`get_indicator_panel`. Idempotent:
+        re-adding the same key is a no-op per asset. Returns ``True``.
         """
         from indicators import Indicator
-        for key, value in self.assets.items():
-            value.add_indicator(
+        for asset in self.assets.values():
+            asset.add_indicator(
                 Indicator(indicator.name, **indicator.params), conn, source=source
             )
+        self._indicators[indicator.key] = source
+        # A fresh application invalidates any previously built panel for this key.
+        self._indicator_panels.pop(indicator.key, None)
+        return True
+
+    def get_indicator_panel(self, conn, name, source=None, **params):
+        """Cross-sectional panel (timestamp x symbol) for one indicator.
+
+        Mirrors :meth:`get_panel`, but the per-symbol column holds an indicator's
+        values instead of a raw price field. If the indicator was not already
+        applied via :meth:`add_indicators`, it is added on demand (using
+        ``source`` if given, else defaulting to ``'close'``). Only indicators that
+        return a single Series are supported — multi-column indicators (e.g.
+        ``bollinger``) raise ``ValueError``. Cached per indicator ``key``.
+
+        Values are aligned to each asset's own bar timestamps and outer-joined on
+        the union of all timestamps, so a symbol with no bar at a timestamp (or a
+        warm-up NaN) is ``NaN`` there.
+        """
+        from indicators import Indicator
+        key = (name, tuple(sorted(params.items())))
+        if key in self._indicator_panels:
+            return self._indicator_panels[key]
+
+        resolved_source = self._indicators.get(key, source if source is not None else 'close')
+
+        dates = set()
+        for asset in self.assets.values():
+            asset.get_prices(conn)
+            dates.update(asset.get_dates())
+        panel = DataFrame({'timestamp': sorted(dates)})
+
+        for symbol, asset in self.assets.items():
+            indicator = asset.get_indicator(name, **params)
+            if indicator is None:
+                indicator = asset.add_indicator(
+                    Indicator(name, **params), conn, source=resolved_source
+                )
+            result = indicator._result
+            if isinstance(result, DataFrame):
+                raise ValueError(
+                    f"Indicator '{name}' returns multiple columns; "
+                    "get_indicator_panel only supports single-Series indicators"
+                )
+            prices = asset.get_prices(conn)
+            column = DataFrame({'timestamp': prices['timestamp'], symbol: result})
+            panel = merge(panel, column, on='timestamp', how='left')
+
+        self._indicators.setdefault(key, resolved_source)
+        self._indicator_panels[key] = panel
+        return panel
 
 
 

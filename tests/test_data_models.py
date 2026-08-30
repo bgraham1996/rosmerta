@@ -289,3 +289,79 @@ def test_market_get_market_stats(market_db, date_bounds):
     assert stats["std"].iloc[0] == pytest.approx(pd.Series([10.5, 20.5]).std())
     # cached per field
     assert m.get_market_stats(conn, agg_option="close") is stats
+
+
+# --- Market indicators -----------------------------------------------------
+
+
+def test_market_add_indicators(market_db, date_bounds):
+    from indicators import Indicator
+
+    start, end = date_bounds
+    conn = market_db.conn()
+    m = Market(conn, start, end, stock_list="core")
+    m.seed_assets(conn)
+    m.populate_assets(conn)
+
+    assert m.add_indicators(conn, Indicator("sma", window=3)) is True
+    # recorded on the market keyed by the indicator's identity
+    assert ("sma", (("window", 3),)) in m._indicators
+    # every asset got the indicator, and each got its OWN instance (a shared
+    # instance would leak the first asset's cached values to the rest)
+    acme_ind = m.assets["ACME"].get_indicator("sma", window=3)
+    beta_ind = m.assets["BETA"].get_indicator("sma", window=3)
+    assert acme_ind is not None and beta_ind is not None
+    assert acme_ind is not beta_ind
+
+
+def test_market_get_indicator_panel(market_db, date_bounds):
+    from indicators import Indicator
+
+    start, end = date_bounds
+    conn = market_db.conn()
+    m = Market(conn, start, end, stock_list="core")
+    m.seed_assets(conn)
+    m.populate_assets(conn)
+    m.add_indicators(conn, Indicator("sma", window=3))
+
+    panel = m.get_indicator_panel(conn, "sma", window=3)
+    assert "timestamp" in panel.columns
+    assert {"ACME", "BETA"} <= set(panel.columns)
+    # union of all timestamps (ACME 5 bars, BETA 3) → 5 rows
+    assert len(panel) == 5
+    # SMA(3) warm-up: first two rows NaN for both symbols
+    assert panel["ACME"].iloc[:2].isna().all()
+    # ACME closes 10.5,11.0,10.8 → mean 10.7667 at the 3rd bar
+    assert panel["ACME"].iloc[2] == pytest.approx((10.5 + 11.0 + 10.8) / 3)
+    assert panel["ACME"].iloc[4] == pytest.approx((10.8 + 11.2 + 12.5) / 3)
+    # BETA has its SMA at the 3rd (last) bar, then NaN where it has no bars
+    assert panel["BETA"].iloc[2] == pytest.approx((20.5 + 21.0 + 20.8) / 3)
+    assert panel["BETA"].iloc[3:].isna().all()
+    # cached per indicator key
+    assert m.get_indicator_panel(conn, "sma", window=3) is panel
+
+
+def test_market_get_indicator_panel_auto_adds(market_db, date_bounds):
+    # get_indicator_panel works even if add_indicators was never called — it
+    # applies the indicator on demand.
+    start, end = date_bounds
+    conn = market_db.conn()
+    m = Market(conn, start, end, stock_list="core")
+    m.seed_assets(conn)
+    m.populate_assets(conn)
+
+    panel = m.get_indicator_panel(conn, "ema", window=2)
+    assert {"ACME", "BETA"} <= set(panel.columns)
+    assert len(panel) == 5
+    # ema(span=2) seeds on the first bar → ACME's first value is its first close
+    assert panel["ACME"].iloc[0] == pytest.approx(10.5)
+
+
+def test_market_get_indicator_panel_multicolumn_raises(market_db, date_bounds):
+    start, end = date_bounds
+    conn = market_db.conn()
+    m = Market(conn, start, end, stock_list="core")
+    m.seed_assets(conn)
+    m.populate_assets(conn)
+    with pytest.raises(ValueError, match="multiple columns"):
+        m.get_indicator_panel(conn, "bollinger", window=2)

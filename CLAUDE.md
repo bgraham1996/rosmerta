@@ -98,6 +98,9 @@ commands consistent with this lazy-import + Rich-output style.
 - `Market(conn, start_date, end_date, stock_list='core', timeframe='hourly')` — a collection of
   `Asset`s drawn from a watchlist; builds cross-sectional panels (`get_panel(field)`) and market
   stats. Workflow: `seed_assets()` → `populate_assets()` → `get_panel()` / `get_market_stats()`.
+  Indicators apply across the whole market via `add_indicators(conn, Indicator(...))` (each asset
+  gets its own copy) and their cross-sectional (timestamp × symbol) result is read back with
+  `get_indicator_panel(conn, name, **params)` — single-Series indicators only.
 
 `utils/bars.py` holds the OHLCV resampling used by `Asset` for `daily`/`weekly`/`monthly`
 timeframes (`RESAMPLE_RULES`, `resample_ohlcv`, `OHLCV_AGG`).
