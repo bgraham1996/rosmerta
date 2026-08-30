@@ -94,6 +94,30 @@ def ema_arb(prices, s_window=9, l_window=20):
     l = prices.ewm(span=l_window, adjust=False).mean()
     return s - l
 
+@register("rsi_ema_cross")
+def rsi_ema_cross(prices, s_window=9, l_window=20, rsi_window=14, oversold=30):
+    """Bullish EMA cross confirmed by an oversold RSI: ``1`` on the trigger bar, else ``0``.
+
+    Fires (``1``) on a bar where the short-span EMA crosses *above* the long-span
+    EMA (the ``short - long`` spread turns positive after being ``<= 0`` on the
+    prior bar) **and** RSI on that same bar is oversold (``< oversold``). Every
+    other bar is ``0``. The oversold filter makes this a long-entry setup: a
+    bullish cross that arrives while the stock is still beaten down.
+
+    Returns an int Series (0/1) aligned to ``prices``' index. Bars where RSI is
+    still warming up (NaN) never trigger, so they read ``0``.
+    """
+    s = prices.ewm(span=s_window, adjust=False).mean()
+    l = prices.ewm(span=l_window, adjust=False).mean()
+    spread = s - l
+    cross_up = (spread > 0) & (spread.shift(1) <= 0)
+
+    rsi_vals = rsi(prices, window=rsi_window)
+    oversold_now = rsi_vals < oversold  # NaN comparisons are False → no trigger
+
+    return (cross_up & oversold_now).astype(int)
+
+
 @register("bollinger")
 def bollinger(prices, window=20, num_std=2):
     """Bollinger Bands as a DataFrame of ``upper``/``middle``/``lower``.

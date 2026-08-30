@@ -13,7 +13,7 @@ import pytest
 
 from indicators import (
     Indicator, _REGISTRY, sma, ema, rsi, bollinger, obv, vwap, days_offset_gain,
-    trading_days_offset_gain,
+    trading_days_offset_gain, rsi_ema_cross,
 )
 
 
@@ -245,6 +245,77 @@ def test_trading_days_offset_gain_aligns_across_dst():
     np.testing.assert_allclose(out["pct"].to_numpy(), [1.0, 1.0, 1.0, np.nan])
 
 
+# --- rsi_ema_cross (bullish EMA cross gated by oversold RSI) ------------------
+
+
+@pytest.fixture
+def oversold_cross_closes():
+    """A long steady decline (RSI-14 deeply oversold) then a brisk uptick that a
+    fast 2/4 EMA pair crosses on while RSI is still down in oversold territory.
+
+    Engineered so the bullish cross and the oversold reading coincide on one
+    bar (index 31) — the setup the indicator is meant to flag.
+    """
+    down = list(np.linspace(100, 55, 30))
+    up = [57.0, 60.0, 64.0, 69.0]
+    return pd.Series(down + up)
+
+
+def test_rsi_ema_cross_is_binary_int(oversold_cross_closes):
+    out = rsi_ema_cross(oversold_cross_closes, s_window=2, l_window=4)
+    assert set(pd.unique(out)).issubset({0, 1})
+    assert out.dtype.kind in ("i", "u")
+
+
+def test_rsi_ema_cross_fires_on_oversold_cross(oversold_cross_closes):
+    out = rsi_ema_cross(
+        oversold_cross_closes, s_window=2, l_window=4, rsi_window=14, oversold=30
+    )
+    # Exactly one trigger, on the bar where the bullish cross meets oversold RSI.
+    assert out.sum() == 1
+    assert out.iloc[31] == 1
+    # That bar is a genuine cross-up (spread turns positive) with RSI < 30.
+    spread = ema(oversold_cross_closes, window=2) - ema(oversold_cross_closes, window=4)
+    assert spread.iloc[31] > 0 and spread.iloc[30] <= 0
+    assert rsi(oversold_cross_closes, window=14).iloc[31] < 30
+
+
+def test_rsi_ema_cross_rsi_gate_blocks(oversold_cross_closes):
+    # RSI at the cross is ~22.7; a stricter oversold=20 gate is unmet, so the
+    # cross is suppressed and the whole series reads 0.
+    out = rsi_ema_cross(
+        oversold_cross_closes, s_window=2, l_window=4, rsi_window=14, oversold=20
+    )
+    assert (out == 0).all()
+
+
+def test_rsi_ema_cross_isolates_crosses_when_gate_open(oversold_cross_closes):
+    # An always-true RSI gate (< 101) reduces the signal to the raw bullish
+    # cross-ups, isolating the cross-detection half of the logic.
+    out = rsi_ema_cross(oversold_cross_closes, s_window=2, l_window=4, oversold=101)
+    spread = ema(oversold_cross_closes, window=2) - ema(oversold_cross_closes, window=4)
+    cross_up = ((spread > 0) & (spread.shift(1) <= 0)).astype(int)
+    pd.testing.assert_series_equal(out, cross_up, check_names=False)
+
+
+def test_rsi_ema_cross_matches_manual_and():
+    # General cross-check: the output is exactly the elementwise AND of a bullish
+    # cross and an oversold RSI, on an independent reversal series.
+    closes = pd.Series(np.concatenate([np.linspace(100, 60, 25), np.linspace(61, 90, 25)]))
+    out = rsi_ema_cross(closes, s_window=9, l_window=20, rsi_window=14, oversold=60)
+    spread = ema(closes, window=9) - ema(closes, window=20)
+    cross_up = (spread > 0) & (spread.shift(1) <= 0)
+    oversold = rsi(closes, window=14) < 60
+    expected = (cross_up & oversold).astype(int)
+    pd.testing.assert_series_equal(out, expected, check_names=False)
+
+
+def test_rsi_ema_cross_uptrend_no_signal():
+    # A pure uptrend is never oversold and has no post-warmup bullish cross.
+    out = rsi_ema_cross(pd.Series(np.linspace(10.0, 100.0, 60)))
+    assert (out == 0).all()
+
+
 # --- Indicator wrapper -----------------------------------------------------
 
 
@@ -270,5 +341,6 @@ def test_indicator_compute_caches_result(closes):
 
 
 def test_builtins_are_registered():
-    for name in ["sma", "ema", "rsi", "bollinger", "obv", "vwap", "days_offset_gain"]:
+    for name in ["sma", "ema", "rsi", "bollinger", "obv", "vwap", "days_offset_gain",
+                 "rsi_ema_cross"]:
         assert name in _REGISTRY
