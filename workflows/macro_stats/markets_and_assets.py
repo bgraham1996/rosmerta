@@ -23,14 +23,16 @@ connection.autocommit = False
 
 # establish last 5 year timeframe
 now = dt.now()
-start = td(now-365)
+start = now - td(days=365 * 5)
+start_date = start.strftime('%Y-%m-%d %H:%M:%S')
+end_date = now.strftime('%Y-%m-%d %H:%M:%S')
 
 
 # creating market
-market = 'core'
+stock_list = 'core'
 
 with connection as conn:
-    market = Market(conn, start, now, market)
+    market = Market(conn, start_date, end_date, stock_list)
     market.seed_assets(conn)
     market.populate_assets(conn)
 
