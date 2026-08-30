@@ -83,6 +83,17 @@ def ema(prices, window):
     return prices.ewm(span=window, adjust=False).mean()
 
 
+@register("ema_arb")
+def ema_arb(prices, s_window=9, l_window=20):
+    """Spread between a short- and long-span EMA (``short - long``).
+
+    Positive when the short EMA sits above the long EMA (bullish alignment),
+    negative when below. Returns a Series aligned to ``prices``' index.
+    """
+    s = prices.ewm(span=s_window, adjust=False).mean()
+    l = prices.ewm(span=l_window, adjust=False).mean()
+    return s - l
+
 @register("bollinger")
 def bollinger(prices, window=20, num_std=2):
     """Bollinger Bands as a DataFrame of ``upper``/``middle``/``lower``.
