@@ -178,12 +178,14 @@ def trading_days_offset_gain(data, days_ahead=20, offset_column='close'):
     """Forward gain ``days_ahead`` *trading days* ahead at the **same bar time**.
 
     For each bar the target is the bar with the identical time-of-day
-    ``days_ahead`` market-open days later. Trading days are taken from the data
-    itself: bars are grouped by time-of-day and shifted ``days_ahead`` positions
-    within each (date-ordered) group, so weekends and holidays — which have no
-    bars to occupy a slot — are skipped automatically. Only exact same-time
-    matches count: where the target bar is absent (the tail of the series, or a
-    DST/data gap that splits the time-of-day group) the value is NaN.
+    ``days_ahead`` market-open days later. Time-of-day is measured in US/Eastern
+    so it tracks the market session and stays aligned across DST (in UTC a
+    session's time-of-day would jump an hour twice a year). Trading days are
+    taken from the data itself: bars are grouped by that Eastern time-of-day and
+    shifted ``days_ahead`` positions within each (date-ordered) group, so
+    weekends and holidays — which have no bars to occupy a slot — are skipped
+    automatically. Only exact same-time matches count: where the target bar is
+    absent (the tail of the series, or a data gap) the value is NaN.
 
     Requires an OHLCV DataFrame with a ``timestamp`` column (call via
     ``source=['timestamp', <col>]``). Returns a DataFrame with two columns,
@@ -198,11 +200,14 @@ def trading_days_offset_gain(data, days_ahead=20, offset_column='close'):
 
     current = data[offset_column].astype('float64')
 
-    # Sort by timestamp so each time-of-day group is date-ordered, then look
-    # days_ahead bars ahead *within the same time-of-day*. The original index
-    # labels are preserved so we can realign to the caller's row order at the end.
+    # Measure time-of-day in US/Eastern so "same bar time" follows the market
+    # session, not the wall clock: a 09:30 ET bar stays grouped with other 09:30
+    # ET bars across the two yearly DST shifts (its UTC time-of-day would jump an
+    # hour). Sorting keeps each group date-ordered; the original index labels are
+    # preserved so we can realign to the caller's row order at the end.
+    eastern = pd.to_datetime(data['timestamp'], utc=True).dt.tz_convert('America/New_York')
     ordered = pd.DataFrame(
-        {'ts': pd.to_datetime(data['timestamp'], utc=True), 'price': current}
+        {'ts': eastern, 'price': current}
     ).sort_values('ts', kind='stable')
     tod = ordered['ts'].dt.strftime('%H:%M:%S')
     future = ordered.groupby(tod, sort=False)['price'].shift(-days_ahead)

@@ -223,6 +223,28 @@ def test_trading_days_offset_gain_empty():
     assert len(out) == 0
 
 
+def test_trading_days_offset_gain_aligns_across_dst():
+    # One session bar (10:00 America/New_York) spanning the 2024 spring-forward
+    # (10 Mar). In UTC that bar is 15:00 before DST (EST) but 14:00 after (EDT),
+    # so grouping by UTC time-of-day would split it into two groups and strand the
+    # pre-DST bar; grouping by Eastern time keeps them one session so the shift
+    # connects across the boundary.
+    ts = pd.to_datetime(
+        [
+            "2024-03-08 15:00",  # Fri, EST -> 10:00 ET
+            "2024-03-11 14:00",  # Mon, EDT -> 10:00 ET
+            "2024-03-12 14:00",  # Tue, EDT -> 10:00 ET
+            "2024-03-13 14:00",  # Wed, EDT -> 10:00 ET
+        ]
+    ).tz_localize("UTC")
+    frame = pd.DataFrame({"timestamp": ts, "close": [10.0, 20.0, 40.0, 80.0]})
+    out = trading_days_offset_gain(frame, days_ahead=1)
+    # All four are the same 10:00 ET session -> one group -> shift(-1):
+    # future [20,40,80,nan]. The pre-DST Fri bar (idx 0) MUST be non-NaN.
+    np.testing.assert_allclose(out["abs"].to_numpy(), [10.0, 20.0, 40.0, np.nan])
+    np.testing.assert_allclose(out["pct"].to_numpy(), [1.0, 1.0, 1.0, np.nan])
+
+
 # --- Indicator wrapper -----------------------------------------------------
 
 
