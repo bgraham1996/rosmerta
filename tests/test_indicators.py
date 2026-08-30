@@ -13,6 +13,7 @@ import pytest
 
 from indicators import (
     Indicator, _REGISTRY, sma, ema, rsi, bollinger, obv, vwap, days_offset_gain,
+    trading_days_offset_gain,
 )
 
 
@@ -155,6 +156,71 @@ def test_days_offset_gain_sorts_by_timestamp(offset_frame):
 def test_days_offset_gain_unknown_mode_raises(offset_frame):
     with pytest.raises(ValueError, match="unknown mode"):
         days_offset_gain(offset_frame, mode="median")
+
+
+# --- trading_days_offset_gain (same-time, business-day lookahead) -------------
+
+
+@pytest.fixture
+def tradingday_frame():
+    """Two bars/day (09:00, 15:00) over four trading days spanning a weekend.
+
+    Thu 04, Fri 05, Mon 08, Tue 09 Jan 2024 — Sat/Sun (06/07) have no bars, so
+    the same-time-of-day shift skips them without any calendar bookkeeping.
+    """
+    ts = pd.to_datetime(
+        [
+            "2024-01-04 09:00", "2024-01-04 15:00",
+            "2024-01-05 09:00", "2024-01-05 15:00",
+            "2024-01-08 09:00", "2024-01-08 15:00",
+            "2024-01-09 09:00", "2024-01-09 15:00",
+        ]
+    ).tz_localize("UTC")
+    return pd.DataFrame(
+        {"timestamp": ts, "close": [10.0, 100.0, 20.0, 200.0, 40.0, 400.0, 80.0, 800.0]}
+    )
+
+
+def test_trading_days_offset_gain_skips_weekends(tradingday_frame):
+    out = trading_days_offset_gain(tradingday_frame, days_ahead=2)
+    assert list(out.columns) == ["abs", "pct"]
+    # 09:00 group [10,20,40,80] shifted 2 trading days (Thu->Mon over the
+    # weekend) -> future [40,80,nan,nan]; 15:00 group [100,200,400,800] ->
+    # [400,800,nan,nan]. Rows interleave 09:00,15:00,...
+    np.testing.assert_allclose(
+        out["abs"].to_numpy(), [30.0, 300.0, 60.0, 600.0, np.nan, np.nan, np.nan, np.nan]
+    )
+    np.testing.assert_allclose(
+        out["pct"].to_numpy(), [3.0, 3.0, 3.0, 3.0, np.nan, np.nan, np.nan, np.nan]
+    )
+
+
+def test_trading_days_offset_gain_exact_time_only(tradingday_frame):
+    # Drop the Mon 09:00 bar: the Thu 09:00 -> (2 trading days) target no longer
+    # exists at 09:00, so within the 09:00 group the shift now reaches Tue 09:00
+    # (still exact same time). The point: values only ever come from same-time bars.
+    frame = tradingday_frame.drop(index=4).reset_index(drop=True)  # remove Mon 09:00
+    out = trading_days_offset_gain(frame, days_ahead=2)
+    # 09:00 group is now [Thu 10, Fri 20, Tue 80]; shift(-2): Thu->Tue(80), rest nan.
+    nine = out.loc[frame["timestamp"].dt.strftime("%H:%M:%S") == "09:00:00", "abs"]
+    np.testing.assert_allclose(nine.to_numpy(), [70.0, np.nan, np.nan])
+
+
+def test_trading_days_offset_gain_realigns_shuffled_input(tradingday_frame):
+    shuffled = tradingday_frame.sample(frac=1, random_state=0)
+    result = trading_days_offset_gain(shuffled, days_ahead=2)
+    expected = trading_days_offset_gain(tradingday_frame, days_ahead=2)
+    for idx in tradingday_frame.index:
+        for col in ("abs", "pct"):
+            a, b = result.loc[idx, col], expected.loc[idx, col]
+            assert (math.isnan(a) and math.isnan(b)) or a == b
+
+
+def test_trading_days_offset_gain_empty():
+    empty = pd.DataFrame({"timestamp": pd.to_datetime([]), "close": []})
+    out = trading_days_offset_gain(empty)
+    assert list(out.columns) == ["abs", "pct"]
+    assert len(out) == 0
 
 
 # --- Indicator wrapper -----------------------------------------------------

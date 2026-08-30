@@ -172,3 +172,43 @@ def days_offset_gain(data, days_ahead=20, bars_per_day=8, mode='pct', offset_col
     # Realign to the order the caller handed us.
     return values.reindex(data.index)
 
+
+@register("trading_days_offset_gain")
+def trading_days_offset_gain(data, days_ahead=20, offset_column='close'):
+    """Forward gain ``days_ahead`` *trading days* ahead at the **same bar time**.
+
+    For each bar the target is the bar with the identical time-of-day
+    ``days_ahead`` market-open days later. Trading days are taken from the data
+    itself: bars are grouped by time-of-day and shifted ``days_ahead`` positions
+    within each (date-ordered) group, so weekends and holidays — which have no
+    bars to occupy a slot — are skipped automatically. Only exact same-time
+    matches count: where the target bar is absent (the tail of the series, or a
+    DST/data gap that splits the time-of-day group) the value is NaN.
+
+    Requires an OHLCV DataFrame with a ``timestamp`` column (call via
+    ``source=['timestamp', <col>]``). Returns a DataFrame with two columns,
+    ``abs`` (raw price difference) and ``pct`` (fractional return), aligned to
+    the caller's index.
+    """
+    if data.empty:
+        return pd.DataFrame(
+            {'abs': pd.Series(dtype='float64'), 'pct': pd.Series(dtype='float64')},
+            index=data.index,
+        )
+
+    current = data[offset_column].astype('float64')
+
+    # Sort by timestamp so each time-of-day group is date-ordered, then look
+    # days_ahead bars ahead *within the same time-of-day*. The original index
+    # labels are preserved so we can realign to the caller's row order at the end.
+    ordered = pd.DataFrame(
+        {'ts': pd.to_datetime(data['timestamp'], utc=True), 'price': current}
+    ).sort_values('ts', kind='stable')
+    tod = ordered['ts'].dt.strftime('%H:%M:%S')
+    future = ordered.groupby(tod, sort=False)['price'].shift(-days_ahead)
+    future = future.reindex(data.index)
+
+    abs_gain = future - current
+    pct_gain = abs_gain / current
+    return pd.DataFrame({'abs': abs_gain, 'pct': pct_gain}, index=data.index)
+
