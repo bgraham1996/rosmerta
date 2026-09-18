@@ -4,13 +4,13 @@ Type: Feature
 Status: Backlog
 Priority: 🟡
 Bucket: analysis
-Cycle: "2"
+Cycle: "3"
 DependsOn: 
 StartDate: 
 EndDate: 
 tags: 
 ---
-> [!note] Your item — drafted from the title. Edit freely. Migrated to the new schema + Cycle 2.
+> [!note] Your item — drafted from the title. Edit freely. Migrated to the new schema; moved to Cycle 3 (alongside the XGBoost work).
 
 # Summary
 A place to **persist, version, and load** trained models plus their metadata (params, feature set, training window, eval metrics), so ML experiments are reproducible and a chosen model can be reused by the dashboard / signal layer instead of retraining ad-hoc. Directly supports the planned [[XGBoost Model]].

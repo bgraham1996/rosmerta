@@ -4,13 +4,13 @@ Type: Feature
 Status: Backlog
 Priority: 🟡
 Bucket: trading
-Cycle: "2"
+Cycle: "3"
 DependsOn: 
 StartDate: 
 EndDate: 
 tags: 
 ---
-> [!note] Your item — drafted from the title. Edit freely. Migrated to the new schema + Cycle 2 (this is live execution — you may want it at Cycle 3).
+> [!note] Your item — drafted from the title. Edit freely. Migrated to the new schema; moved to Cycle 3 (live execution, alongside the ML/rearchitecture work).
 
 # Summary
 Add an interactive **terminal UI** to review candidates and **place orders** through IB — turning rosmerta from read-only (fetch / analyse / `portfolio`) into something that can act. Long-only per how the book is traded (buy then sell, never short). Uses `ib-insync` `placeOrder`. This is a significant step: real execution, so it should start on paper and carry hard safety guards.

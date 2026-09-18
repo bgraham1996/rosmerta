@@ -4,13 +4,13 @@ Type: Feature
 Status: Backlog
 Priority: 🟡
 Bucket: analysis
-Cycle: "2"
+Cycle: "3"
 DependsOn: 
 StartDate: 
 EndDate: 
 tags: 
 ---
-> [!note] Your item — drafted from the title. Edit freely. Migrated to the new schema + Cycle 2.
+> [!note] Your item — drafted from the title. Edit freely. Migrated to the new schema; moved to Cycle 3 (builds on the ML/feature work).
 
 # Summary
 Cluster the universe by behaviour (returns / volatility / indicator features) to surface groups of similar-moving stocks — useful for diversification, pair ideas, and seeing market structure/regimes. Exploratory, not a screener.
