@@ -1,18 +1,14 @@
 ---
-tags:
-DevStatus: 
-DependsOn: Flex trades ingest (done)
-DevBucket: portfolio
-ReviewCount:
 FileType: 🚥 Dev Item
-StartDate:
-EndDate: 
+Type: Feature
+Status: Backlog
 Priority: 🟡
-Dev Status:
+Bucket: portfolio
 Cycle: "1"
-ProjectCodes:
-Requirements:
-Completed: false
+DependsOn: Flex trades ingest (done)
+StartDate: 
+EndDate: 
+tags: 
 ---
 
 # Feature Summary

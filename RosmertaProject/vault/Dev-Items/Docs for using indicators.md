@@ -1,18 +1,14 @@
 ---
-tags:
-DevStatus: 
-DependsOn: 
-DevBucket: docs
-ReviewCount:
 FileType: 🚥 Dev Item
-StartDate:
-EndDate: 
+Type: Chore
+Status: Backlog
 Priority: 🟢
-Dev Status:
+Bucket: docs
 Cycle: "1"
-ProjectCodes:
-Requirements:
-Completed: false
+DependsOn: 
+StartDate: 
+EndDate: 
+tags: 
 ---
 
 # Feature Summary
