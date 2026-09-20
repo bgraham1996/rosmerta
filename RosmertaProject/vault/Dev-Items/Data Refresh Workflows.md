@@ -1,12 +1,12 @@
 ---
 FileType: 🚥 Dev Item
 Type: Feature
-Status: Backlog
+Status: In Progress
 Priority: 🔴
 Bucket: workflows
 Cycle: "2"
 DependsOn: Incremental Fetch and Dedup
-StartDate: 
+StartDate: 2026-09-20
 EndDate: 
 tags: 
 ---
@@ -30,3 +30,6 @@ The Architecture Vision names three priority CLI workflows for keeping data curr
 - `workflows/refresh_data/` (started), `price_retrival/bulk_fetch.py`, `main.py` (CLI group), Architecture Vision → CLI priorities.
 ##### Prerequisite for
 - Scheduled/automated refresh; reliable inputs for the stats + valuation layers.
+
+> [!info] In progress (2026-09-20)
+> `workflows/refresh_data/update_core.py` (refresh core-watchlist prices to date ≈ the p1 `daily download`) landed on `main` (commit `bedeb39`) with a test. **Remaining:** `backfill` (p2) and `repair`/gap-fill (p3), plus wiring all three into the click CLI. Still gated on [[Incremental Fetch and Dedup]].

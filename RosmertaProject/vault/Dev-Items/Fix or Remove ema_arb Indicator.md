@@ -1,13 +1,13 @@
 ---
 FileType: 🚥 Dev Item
 Type: Tech-Debt
-Status: Backlog
+Status: Done
 Priority: 🟡
 Bucket: indicators
 Cycle: "2"
 DependsOn: 
 StartDate: 
-EndDate: 
+EndDate: 2026-09-20
 tags: 
 ---
 # Summary
@@ -28,3 +28,6 @@ tags:
 - `indicators.py` (`ema_arb`, the `@register` registry), `tests/test_indicators.py`.
 ##### Prerequisite for
 - A clean, all-working indicator registry (nothing that errors on compute).
+
+> [!success] Done (2026-09-20)
+> Kept and fixed. `ema_arb(prices, s_window=9, l_window=20)` now returns the short−long EMA spread (`.ewm`, `adjust=False`); no more `.ewn` typo / `return True`. Covered by `tests/test_indicators.py`. Landed on `main` in the fix-ema-arb-workflow consolidation (commit `bedeb39`).

@@ -1,12 +1,12 @@
 ---
 FileType: 🚥 Dev Item
 Type: Feature
-Status: Backlog
+Status: In Progress
 Priority: 🟢
 Bucket: analysis
 Cycle: "2"
 DependsOn: 
-StartDate: 
+StartDate: 2026-09-20
 EndDate: 
 tags: 
 ---
@@ -29,3 +29,6 @@ A reusable **feature-generation** step that turns raw price/fundamental data int
 - `workflows/basic_feature_generation/` (started), `workflows/macro_stats/`, `indicators.py`, `data_models.py`.
 ##### Prerequisite for
 - Basic XGBoost / ML experiments (a clean feature matrix is the precondition).
+
+> [!info] In progress (2026-09-20)
+> The `workflows/basic_feature_generation/` scaffolding is now **real code** on `main` (commit `bedeb39`): `daily_ema_fan`, `ema_cross_rsi_booster`, `vwap_fan` (+ `macro_stats/running_20d_returns`), with workflow tests. **Remaining:** decide the v1 unified feature set and persist/cache a reusable per-ticker feature matrix (currently these are individual feature scripts, not one standard output).

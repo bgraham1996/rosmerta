@@ -50,4 +50,4 @@ The reports are produced by the **`weekly-price-report`** Claude Code skill (thr
 modes: weekly, biweekly, backtest), all parameterisable by watchlist and date range.
 See **[[Running the reports]]** for the exact commands and options.
 
-Related: [[Docs for using indicators]] · [[Lookforawd gains]]
+Related: [[Docs for using indicators]] · [[Lookforward gains]]
