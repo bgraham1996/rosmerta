@@ -83,6 +83,41 @@ def ema(prices, window):
     return prices.ewm(span=window, adjust=False).mean()
 
 
+@register("ema_arb")
+def ema_arb(prices, s_window=9, l_window=20):
+    """Spread between a short- and long-span EMA (``short - long``).
+
+    Positive when the short EMA sits above the long EMA (bullish alignment),
+    negative when below. Returns a Series aligned to ``prices``' index.
+    """
+    s = prices.ewm(span=s_window, adjust=False).mean()
+    l = prices.ewm(span=l_window, adjust=False).mean()
+    return s - l
+
+@register("rsi_ema_cross")
+def rsi_ema_cross(prices, s_window=9, l_window=20, rsi_window=14, oversold=30):
+    """Bullish EMA cross confirmed by an oversold RSI: ``1`` on the trigger bar, else ``0``.
+
+    Fires (``1``) on a bar where the short-span EMA crosses *above* the long-span
+    EMA (the ``short - long`` spread turns positive after being ``<= 0`` on the
+    prior bar) **and** RSI on that same bar is oversold (``< oversold``). Every
+    other bar is ``0``. The oversold filter makes this a long-entry setup: a
+    bullish cross that arrives while the stock is still beaten down.
+
+    Returns an int Series (0/1) aligned to ``prices``' index. Bars where RSI is
+    still warming up (NaN) never trigger, so they read ``0``.
+    """
+    s = prices.ewm(span=s_window, adjust=False).mean()
+    l = prices.ewm(span=l_window, adjust=False).mean()
+    spread = s - l
+    cross_up = (spread > 0) & (spread.shift(1) <= 0)
+
+    rsi_vals = rsi(prices, window=rsi_window)
+    oversold_now = rsi_vals < oversold  # NaN comparisons are False → no trigger
+
+    return (cross_up & oversold_now).astype(int)
+
+
 @register("bollinger")
 def bollinger(prices, window=20, num_std=2):
     """Bollinger Bands as a DataFrame of ``upper``/``middle``/``lower``.
@@ -160,4 +195,49 @@ def days_offset_gain(data, days_ahead=20, bars_per_day=8, mode='pct', offset_col
 
     # Realign to the order the caller handed us.
     return values.reindex(data.index)
+
+
+@register("trading_days_offset_gain")
+def trading_days_offset_gain(data, days_ahead=20, offset_column='close'):
+    """Forward gain ``days_ahead`` *trading days* ahead at the **same bar time**.
+
+    For each bar the target is the bar with the identical time-of-day
+    ``days_ahead`` market-open days later. Time-of-day is measured in US/Eastern
+    so it tracks the market session and stays aligned across DST (in UTC a
+    session's time-of-day would jump an hour twice a year). Trading days are
+    taken from the data itself: bars are grouped by that Eastern time-of-day and
+    shifted ``days_ahead`` positions within each (date-ordered) group, so
+    weekends and holidays — which have no bars to occupy a slot — are skipped
+    automatically. Only exact same-time matches count: where the target bar is
+    absent (the tail of the series, or a data gap) the value is NaN.
+
+    Requires an OHLCV DataFrame with a ``timestamp`` column (call via
+    ``source=['timestamp', <col>]``). Returns a DataFrame with two columns,
+    ``abs`` (raw price difference) and ``pct`` (fractional return), aligned to
+    the caller's index.
+    """
+    if data.empty:
+        return pd.DataFrame(
+            {'abs': pd.Series(dtype='float64'), 'pct': pd.Series(dtype='float64')},
+            index=data.index,
+        )
+
+    current = data[offset_column].astype('float64')
+
+    # Measure time-of-day in US/Eastern so "same bar time" follows the market
+    # session, not the wall clock: a 09:30 ET bar stays grouped with other 09:30
+    # ET bars across the two yearly DST shifts (its UTC time-of-day would jump an
+    # hour). Sorting keeps each group date-ordered; the original index labels are
+    # preserved so we can realign to the caller's row order at the end.
+    eastern = pd.to_datetime(data['timestamp'], utc=True).dt.tz_convert('America/New_York')
+    ordered = pd.DataFrame(
+        {'ts': eastern, 'price': current}
+    ).sort_values('ts', kind='stable')
+    tod = ordered['ts'].dt.strftime('%H:%M:%S')
+    future = ordered.groupby(tod, sort=False)['price'].shift(-days_ahead)
+    future = future.reindex(data.index)
+
+    abs_gain = future - current
+    pct_gain = abs_gain / current
+    return pd.DataFrame({'abs': abs_gain, 'pct': pct_gain}, index=data.index)
 
