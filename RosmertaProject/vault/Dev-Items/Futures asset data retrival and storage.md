@@ -1,33 +1,56 @@
 ---
 FileType: 🚥 Dev Item
 Type: Feature
-Status: Backlog
+Status: In Progress
 Priority: 🔴
 Bucket: core-components
-Cycle: "2"
+Cycle: "1"
 DependsOn: 
-StartDate: 
+StartDate: 2026-09-20
 EndDate: 
 tags: 
 ---
-> [!note] Your item — drafted from the title (kept your 🔴 / `core-components`). Edit freely. Migrated to the new schema + Cycle 2.
+> [!note] Epic — decomposed 2026-09-20. This is now the umbrella for futures support; the actionable near-term slices are broken out into their own items (see Links). Kept your 🔴 / `core-components`.
 
 # Summary
-Extend the pipeline beyond equities to **futures**: retrieve and store futures price data (a long-standing roadmap item — "futures-data workflow", "APIs by cadence: futures daily"). Today only equities exist (`stocks` + `price_hourly`). Futures bring contract expiries, rolls, and continuous series, so they need their own modelling rather than being forced into the equity tables.
+Extend the pipeline beyond equities to **futures**: retrieve and store futures OHLCV. Today only equities exist (`stocks` + `price_hourly`).
 
-# Development Plan
-- [ ] Model futures: contract (symbol, expiry, exchange, multiplier) + a continuous/rolled series; decide new table(s) vs extending the schema.
-- [ ] IB retrieval via `ib-insync` `Future` / `ContFuture`; handle roll logic and the front-month convention.
-- [ ] Timeframe/session handling (futures trade nearly 24h — differs from equity sessions in `utils/bars`).
-- [ ] Decide how `Asset`/`Market` consume futures (shared path vs parallel class).
+**Chosen model (2026-09-20): contracts-as-stocks with a self-referential parent.**
+- Each specific futures contract (e.g. `ESH26`) is stored as its **own `stocks` row**.
+- The root (e.g. `ES`) is also a `stocks` row.
+- Contracts link to their root via a new **`stocks.parent_stock_id`** (self-FK, nullable). Equities keep `parent_stock_id = NULL`.
+- **OHLCV reuses `price_hourly` unchanged** (keyed by `stock_id`) — a contract's candles are just `price_hourly` rows. No new price table.
 
-# Dependencies
-##### Depends on
-- Nothing hard; sits alongside the equity fetchers.
-##### Requires
-- IB futures market-data permissions; `ib-insync`.
+**Why this fits:**
+- The existing read path already serves a contract's candles (query `price_hourly` by its `stock_id`); the root row is a stable handle to enumerate contracts / pick a front month later.
+- **No clash with `UNIQUE(symbol)`** (added by the dedupe migration): each contract carries a *distinct* symbol (`ESH26` ≠ `ESM26` ≠ `ES`). This is the key advantage over cramming every expiry under one `ES` symbol.
+
+# Phasing
+**Near-term (this focus):** DB shape + OHLCV storage/retrieval, source-agnostic — can be built and tested with manual/synthetic candles *before* IB is wired.
+- [[Futures schema - contracts as stocks]] — the migration(s).
+- [[Futures OHLCV storage and retrieval]] — store/serve candles per contract + per root.
+
+**Deferred (explicitly out of the near-term slice):**
+- [[Futures IB retrieval]] — IB `Future` / `ContFuture` fetch, `useRTH=False`, roll / front-month, 30-day chunking. *Not now.*
+- [[Futures in Asset and Market]] — how the analysis classes consume futures (shared path vs parallel). *Not now.*
+
+# Design principle
+**The DB is the source of truth and must be API / third-party agnostic** as far as possible. Vendor identifiers and quirks (IB `localSymbol`, `conId`, routing exchanges) are mapped *in* at ingestion; the canonical schema stores normalised values. See [[Reconcile DB schema - init migrations and scripts]].
+
+# Decisions (2026-09-20)
+- **Symbol convention:** store the **normalised** symbol (`ESH26`), not IB's `localSymbol` (`ESH6`). Keep the vendor id in `ib_con_id`.
+- **Row kind:** use a `sec_type` column (`STK` / `FUTROOT` / `FUT`) alongside `parent_stock_id` — M2 is in scope.
+- **Root row:** an **organizing parent for now** — *not* fetchable yet. Root fetchability is deferred until we have aggregation logic for overlapping contracts (see below).
+
+# Model functionality needed now
+Just **parent → children navigation**: from a root (`ES`), get its current / recent child contracts (via `parent_stock_id`). Front-month selection, roll, and cross-contract aggregation are **not** needed for the first cut.
+
+# Open questions / deferred
+- **Overlapping-contract aggregation:** how to combine/roll across contracts whose data overlaps — the prerequisite for *both* a fetchable root and a continuous series. Deferred.
+- **Continuous series:** model later as another child row (`CONTFUT`) or via our own roll logic, once the aggregation logic exists. Deferred.
+
 # Links
 ##### Relevant Docs
-- `price_retrival/ib_api.py`, `db/init.sql` (`stocks`/`price_hourly`), `utils/bars.py`, Roadmap → futures-data workflow.
+- `db/init.sql` (`stocks` / `price_hourly`), `db/db_scripts/migrations/`, `price_retrival/ib_api.py` (later), `utils/bars.py` (later).
 ##### Prerequisite for
-- Any futures-based analysis / stat-arb across asset classes.
+- Any futures-based analysis / cross-asset stat-arb.
