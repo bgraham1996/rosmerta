@@ -13,7 +13,7 @@ import pytest
 
 from indicators import (
     Indicator, _REGISTRY, sma, ema, rsi, bollinger, obv, vwap, days_offset_gain,
-    trading_days_offset_gain, rsi_ema_cross,
+    trading_days_offset_gain, rsi_ema_cross, macd, atr, stochastic, adx,
 )
 
 
@@ -342,5 +342,83 @@ def test_indicator_compute_caches_result(closes):
 
 def test_builtins_are_registered():
     for name in ["sma", "ema", "rsi", "bollinger", "obv", "vwap", "days_offset_gain",
-                 "rsi_ema_cross"]:
+                 "rsi_ema_cross", "macd", "atr", "stochastic", "adx"]:
         assert name in _REGISTRY
+
+
+def test_macd_structure_and_relations():
+    s = pd.Series(np.arange(1, 60, dtype=float))
+    result = macd(s, fast=12, slow=26, signal=9)
+    assert list(result.columns) == ["macd", "signal", "histogram"]
+    # macd line is fast EMA minus slow EMA; histogram is macd minus signal.
+    np.testing.assert_allclose(
+        result["macd"].to_numpy(), (ema(s, 12) - ema(s, 26)).to_numpy()
+    )
+    np.testing.assert_allclose(
+        result["histogram"].to_numpy(),
+        (result["macd"] - result["signal"]).to_numpy(),
+    )
+    # On a strictly rising series the fast EMA leads the slow → macd > 0.
+    assert (result["macd"].iloc[26:] > 0).all()
+
+
+def test_atr_matches_true_range_mean():
+    # With window=1, Wilder ATR is just the True Range itself.
+    data = pd.DataFrame(
+        {
+            "high": [10.0, 11.0, 12.0, 11.5],
+            "low": [9.0, 9.5, 10.0, 10.5],
+            "close": [9.5, 10.5, 11.0, 11.0],
+        }
+    )
+    result = atr(data, window=1)
+    prev_close = data["close"].shift(1)
+    tr = pd.concat(
+        [
+            data["high"] - data["low"],
+            (data["high"] - prev_close).abs(),
+            (data["low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    np.testing.assert_allclose(result.to_numpy(), tr.to_numpy())
+    # ATR is non-negative everywhere it is defined.
+    assert (atr(data, window=2).dropna() >= 0).all()
+
+
+def test_stochastic_bounds_and_extremes():
+    rng = np.random.default_rng(1)
+    highs = np.cumsum(np.abs(rng.standard_normal(100))) + 100
+    data = pd.DataFrame(
+        {
+            "high": highs + 1,
+            "low": highs - 1,
+            "close": highs,
+        }
+    )
+    result = stochastic(data, k=14, d=3)
+    assert list(result.columns) == ["k", "d"]
+    k = result["k"].dropna()
+    assert ((k >= 0) & (k <= 100)).all()
+    # Close at the top of its k-bar range → %K == 100.
+    top = pd.DataFrame(
+        {"high": [1, 2, 3.0], "low": [0, 1, 2.0], "close": [1, 2, 3.0]}
+    )
+    np.testing.assert_allclose(stochastic(top, k=3, d=1)["k"].iloc[-1], 100.0)
+
+
+def test_adx_structure_and_direction():
+    # A strong, steady up-trend: +DI should dominate -DI.
+    n = 60
+    up = pd.DataFrame(
+        {
+            "high": np.arange(2, n + 2, dtype=float),
+            "low": np.arange(1, n + 1, dtype=float),
+            "close": np.arange(1.5, n + 1.5, dtype=float),
+        }
+    )
+    result = adx(up, window=14)
+    assert list(result.columns) == ["adx", "plus_di", "minus_di"]
+    tail = result.dropna()
+    assert (tail["plus_di"] > tail["minus_di"]).all()
+    assert ((tail["adx"] >= 0) & (tail["adx"] <= 100)).all()
