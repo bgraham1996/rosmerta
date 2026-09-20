@@ -19,13 +19,23 @@
 -- The IB fetcher (price_retrival/ib_api.py _get_or_create_stock) looks up
 -- by (symbol, exchange) and IB always reports 'SMART', so the SMART rows
 -- are what every future fetch will hit. This migration therefore makes
--- the SMART rows canonical: it repoints watchlist_members onto them,
--- deletes the empty old duplicates, and replaces uq_symbol_exchange with
--- a stricter UNIQUE(symbol) so the table can't fork again.
+-- the SMART rows canonical: it repoints watchlist_members AND trade rows
+-- onto them, deletes the empty old duplicates, and replaces
+-- uq_symbol_exchange with a stricter UNIQUE(symbol) so the table can't
+-- fork again.
 --
--- Untouched by design: the two singleton symbols with no SMART twin,
--- AAL (NASDAQ) and ABB (NYSE) -- they have no price data anywhere and
+-- Untouched by design: symbols with no SMART twin (e.g. AAL/ABB, and the
+-- trade-only tickers IBRX/OKLO) -- they have no price data anywhere and
 -- stay as-is (still need a fetch before they'll analyse).
+--
+-- NOTE (2026-08-26): the original version of this migration only
+-- repointed watchlist_members and guarded on price_hourly. It aborted on
+-- the live DB because the later-added `trade` table (db/add_positions.sql,
+-- populated by the IB Flex trades ingest) also referenced the old rows --
+-- in fact ALL 21 trades resolved to the empty old seeding. Step 2b below
+-- repoints those trades onto the SMART twin before the delete, and Step 4c
+-- asserts none remain stranded. IBRX/OKLO trades sit on twin-less
+-- singletons, so their rows are not deletable and are left in place.
 --
 -- Safety: runs in a single transaction with post-condition assertions
 -- that RAISE EXCEPTION (auto-rollback) if dedup or repointing is
@@ -75,9 +85,25 @@ WHERE wm.stock_id = s_old.stock_id
   );
 
 -- -------------------------------------------------------------
+-- Step 2b. Repoint trade rows from each old (non-SMART) row onto its
+--          SMART twin. Unlike watchlists there is no per-list unique
+--          constraint to worry about -- trade.ib_trade_id is unique but
+--          is untouched here -- so a straight UPDATE suffices. Trades on
+--          twin-less singletons (IBRX/OKLO) are not matched and stay put.
+-- -------------------------------------------------------------
+UPDATE trade t
+SET stock_id = s_new.stock_id
+FROM stocks s_old
+JOIN stocks s_new
+  ON s_new.symbol = s_old.symbol
+ AND s_new.exchange = 'SMART'
+WHERE t.stock_id = s_old.stock_id
+  AND s_old.exchange <> 'SMART';
+
+-- -------------------------------------------------------------
 -- Step 3. Delete the empty old duplicate stock rows: any non-SMART row
 --         that has a SMART twin AND holds no price bars. Singletons
---         (AAL, ABB) have no SMART twin, so they are not matched.
+--         (no SMART twin) have no match, so they are not deleted.
 --         (If an old row were still referenced by any other FK table,
 --         the delete would error and roll the whole migration back.)
 -- -------------------------------------------------------------
@@ -97,8 +123,9 @@ WHERE s_old.exchange <> 'SMART'
 -- -------------------------------------------------------------
 DO $$
 DECLARE
-    dup_symbols   int;
-    stranded_refs int;
+    dup_symbols     int;
+    stranded_refs   int;
+    stranded_trades int;
 BEGIN
     -- 4a. No symbol may appear more than once anymore.
     SELECT count(*) INTO dup_symbols FROM (
@@ -122,7 +149,21 @@ BEGIN
         RAISE EXCEPTION 'Repoint incomplete: % watchlist row(s) still on an old duplicate', stranded_refs;
     END IF;
 
-    RAISE NOTICE 'Dedup OK: one row per symbol, watchlists repointed to SMART.';
+    -- 4c. No trade may still point at an old row that had a SMART twin
+    --     available (proves the trade repoint succeeded).
+    SELECT count(*) INTO stranded_trades
+    FROM trade t
+    JOIN stocks s ON s.stock_id = t.stock_id
+    WHERE s.exchange <> 'SMART'
+      AND EXISTS (
+            SELECT 1 FROM stocks s2
+            WHERE s2.symbol = s.symbol AND s2.exchange = 'SMART'
+      );
+    IF stranded_trades > 0 THEN
+        RAISE EXCEPTION 'Repoint incomplete: % trade row(s) still on an old duplicate', stranded_trades;
+    END IF;
+
+    RAISE NOTICE 'Dedup OK: one row per symbol, watchlists + trades repointed to SMART.';
 END $$;
 
 -- -------------------------------------------------------------
@@ -140,12 +181,3 @@ ALTER TABLE stocks DROP CONSTRAINT IF EXISTS uq_symbol_exchange;
 ALTER TABLE stocks ADD  CONSTRAINT uq_stocks_symbol UNIQUE (symbol);
 
 COMMIT;
-
--- =============================================================
--- Rollback note: if you review the psql output and want to abort BEFORE
--- committing, run this file with `psql --single-transaction` and issue
--- ROLLBACK, or wrap the run in `BEGIN; \i <file>` minus the COMMIT above.
--- After COMMIT the deletes are permanent -- take a dump first if unsure:
---   pg_dump -U stock_user -d stocks -h <host> -t stocks -t watchlist_members \
---     > stocks_watchlist_backup.sql
--- =============================================================
