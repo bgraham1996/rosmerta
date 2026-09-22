@@ -17,3 +17,13 @@ db_exports/
 
 # Claude Code worktrees (never commit)
 .claude/worktrees/
+
+# Obsidian: volatile UI state + bulky third-party plugin code
+**/.obsidian/workspace.json
+**/.obsidian/workspace-mobile.json
+**/.obsidian/plugins/
+# macOS junk
+.DS_Store
+**/.DS_Store
+._*
+**/._*
