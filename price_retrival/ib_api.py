@@ -327,18 +327,24 @@ class IBStockDataFetcher:
     # Futures (contracts-as-stocks) — Phase A: single named contract
     # ---------------------------------------------------------
     @staticmethod
-    def _to_utc_naive(dt):
-        """Normalise an IB bar timestamp to **naive UTC**.
+    def _to_utc(dt):
+        """Normalise an IB bar timestamp to a **tz-aware UTC** datetime.
 
         IB returns futures bars tz-aware in exchange-local time (e.g. CME /
-        Central). The DB convention (``data_models``) treats stored naive
-        timestamps as UTC, so we convert to UTC and drop tzinfo — never reuse
-        the equity path's bare ``.replace(tzinfo=None)``, which would mislabel
-        a Central timestamp as UTC. A naive input is assumed already-UTC.
+        Central). We keep tzinfo as UTC rather than dropping it: ``price_hourly.
+        timestamp`` is ``TIMESTAMPTZ``, so a *naive* value would be reinterpreted
+        in the DB session timezone (observed: ``Europe/London``) and land at the
+        wrong instant (e.g. a 22:00Z bar stored as 21:00Z in summer). Passing a
+        tz-aware UTC value stores the exact instant regardless of session tz, and
+        ``data_models.Asset`` queries this column with UTC-aware bounds, so true
+        instants are what the analysis layer compares against. A naive input is
+        assumed already-UTC. (The equity path's bare ``.replace(tzinfo=None)`` has
+        the latent offset bug; reconciling that is the timezone-support item.)
         """
         if getattr(dt, 'tzinfo', None) is None:
-            return dt if isinstance(dt, datetime) else datetime(dt.year, dt.month, dt.day)
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+            d = dt if isinstance(dt, datetime) else datetime(dt.year, dt.month, dt.day)
+            return d.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
 
     def get_futures_hourly_bars(self, root, expiry, exchange,
                                 currency='USD', start_date=None, end_date=None,
@@ -410,8 +416,7 @@ class IBStockDataFetcher:
                 )
                 if bars:
                     all_bars.extend(bars)
-                    earliest = self._to_utc_naive(bars[0].date)
-                    current_end = earliest.replace(tzinfo=timezone.utc) - timedelta(hours=1)
+                    current_end = self._to_utc(bars[0].date) - timedelta(hours=1)
                 else:
                     self.logger.warning(f"No data for period ending {current_end}")
                     break
@@ -421,10 +426,10 @@ class IBStockDataFetcher:
                 self.logger.warning(f"No data retrieved for {root} {expiry}")
                 return None
 
-            # Convert to UTC-naive candles, de-duped last-wins by timestamp.
+            # Convert to tz-aware UTC candles, de-duped last-wins by timestamp.
             candles = {}
             for b in all_bars:
-                ts = self._to_utc_naive(b.date)
+                ts = self._to_utc(b.date)
                 candles[ts] = (ts, b.open, b.high, b.low, b.close, int(b.volume))
             candles = [candles[ts] for ts in sorted(candles)]
 
@@ -458,8 +463,7 @@ class IBStockDataFetcher:
                     f"and saved {n} UTC bars"
                 )
                 self._log_fetch(stock_id, 'price_hourly',
-                                start_dt.replace(tzinfo=None), end_dt.replace(tzinfo=None),
-                                len(df), 'success')
+                                start_dt, end_dt, len(df), 'success')
 
             return df
 
