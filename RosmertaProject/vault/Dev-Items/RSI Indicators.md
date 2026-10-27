@@ -1,18 +1,14 @@
 ---
-tags:
-DevStatus: Done
-DependsOn: 
-DevBucket: indicators
-ReviewCount:
 FileType: 🚥 Dev Item
-StartDate:
-EndDate: 2026-08-01
+Type: Feature
+Status: Done
 Priority: 🟡
-Dev Status:
-Cycle: "1"
-ProjectCodes:
-Requirements:
-Completed: true
+Bucket: indicators
+Cycle: "0"
+DependsOn: 
+StartDate: 
+EndDate: 2026-08-01
+tags: 
 ---
 
 # Feature Summary

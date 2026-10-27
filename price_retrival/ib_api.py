@@ -18,7 +18,8 @@ from ib_insync import *
 import logging
 import nest_asyncio
 import psycopg2
-from psycopg2.extras import execute_values
+
+from price_retrival.ohlcv_store import upsert_hourly_bars
 
 # Allow nested event loops (needed if running from Jupyter/IPython)
 nest_asyncio.apply()
@@ -155,37 +156,27 @@ class IBStockDataFetcher:
     def _save_bars_to_db(self, stock_id, df):
         """
         Upsert hourly bars into the price_hourly table.
-        Uses ON CONFLICT to handle re-fetches gracefully.
+
+        Thin IB adapter over the source-agnostic candle store: it converts the
+        ib-insync DataFrame into ``(ts, o, h, l, c, v)`` tuples and delegates
+        the actual upsert to ``ohlcv_store.upsert_hourly_bars`` so IB, futures,
+        and any future non-IB source share one write path. ON CONFLICT still
+        handles re-fetches gracefully.
         """
         if not self.db_conn or self.db_conn.closed:
             if not self.connect_db():
                 return False
 
-        records = [
-            (stock_id, row.date, row.open, row.high, row.low, row.close, int(row.volume))
+        candles = [
+            (row.date, row.open, row.high, row.low, row.close, int(row.volume))
             for row in df.itertuples()
         ]
 
-        insert_sql = """
-            INSERT INTO price_hourly (stock_id, timestamp, open, high, low, close, volume)
-            VALUES %s
-            ON CONFLICT (stock_id, timestamp)
-            DO UPDATE SET
-                open   = EXCLUDED.open,
-                high   = EXCLUDED.high,
-                low    = EXCLUDED.low,
-                close  = EXCLUDED.close,
-                volume = EXCLUDED.volume
-        """
-
         try:
-            with self.db_conn.cursor() as cur:
-                execute_values(cur, insert_sql, records)
-            self.db_conn.commit()
-            self.logger.info(f"Saved {len(records)} bars to database for stock_id={stock_id}")
+            n = upsert_hourly_bars(self.db_conn, stock_id, candles)
+            self.logger.info(f"Saved {n} bars to database for stock_id={stock_id}")
             return True
         except Exception as e:
-            self.db_conn.rollback()
             self.logger.error(f"Error saving bars to DB: {e}")
             return False
 

@@ -39,7 +39,15 @@ class FakeCursor:
 
     def execute(self, sql, params=()):
         s = " ".join(sql.split())  # collapse whitespace for stable matching
-        if "FROM stocks WHERE symbol" in s:
+        if "INSERT INTO stocks" in s:
+            # get_or_create_root / register_contract upsert (ON CONFLICT (symbol)).
+            # Distinguished by whether the contract-only parent_stock_id column
+            # is written. Models RETURNING stock_id.
+            self._result = [(self._db.upsert_stock(s, params),)]
+        elif "FROM stocks WHERE parent_stock_id" in s:
+            # Root -> children navigation, ordered by expiry.
+            self._result = self._db.child_contracts(params[0])
+        elif "FROM stocks WHERE symbol" in s:
             symbol = params[0]
             self._result = [self._db.stocks.get(symbol)]  # (stock_id, name) or None
         elif "FROM price_hourly" in s:
@@ -65,13 +73,24 @@ class FakeCursor:
 
 
 class FakeConnection:
-    """Connection wrapper whose ``cursor()`` yields a :class:`FakeCursor`."""
+    """Connection wrapper whose ``cursor()`` yields a :class:`FakeCursor`.
+
+    ``commit`` / ``rollback`` are no-ops: the fake mutates in-memory dicts
+    immediately, so the write-path code (``ohlcv_store`` / ``futures``) can call
+    them without a real transaction.
+    """
 
     def __init__(self, db):
         self._db = db
 
     def cursor(self):
         return FakeCursor(self._db)
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
 
 
 class FakeDB:
@@ -92,9 +111,73 @@ class FakeDB:
         self.dividends = {}
         self.fundamentals = {}
         self.watchlists = {}
+        # Full stock rows keyed by stock_id, for the futures write/nav path:
+        # {stock_id: {symbol, name, sec_type, parent_stock_id, expiry,
+        #             multiplier, ib_con_id, is_active}}
+        self.stock_rows = {}
+        self._next_stock_id = 1
 
     def conn(self):
         return FakeConnection(self)
+
+    # -- futures write path -------------------------------------------------
+    def upsert_stock(self, sql, params):
+        """Model ``INSERT INTO stocks ... ON CONFLICT (symbol) ... RETURNING``.
+
+        Returns the (new or existing) stock_id. ``sql`` is the whitespace-
+        collapsed statement; a contract insert is recognised by the
+        ``parent_stock_id`` column it writes.
+        """
+        is_contract = "parent_stock_id" in sql
+        symbol, name = params[0], params[1]
+        existing = self.stocks.get(symbol)
+        if existing:
+            stock_id = existing[0]
+        else:
+            stock_id = self._next_stock_id
+            self._next_stock_id += 1
+        row = self.stock_rows.get(stock_id, {"is_active": True})
+        row.update(symbol=symbol, name=name)
+        if is_contract:
+            # params: symbol, name, exchange, currency, parent_stock_id,
+            #         expiry, multiplier, ib_con_id
+            row.update(sec_type="FUT", parent_stock_id=params[4],
+                       expiry=params[5], multiplier=params[6],
+                       ib_con_id=params[7])
+        else:
+            row.update(sec_type="FUTROOT", parent_stock_id=None)
+        self.stock_rows[stock_id] = row
+        self.stocks[symbol] = (stock_id, name)
+        return stock_id
+
+    def child_contracts(self, root_id):
+        """Rows ``(stock_id, symbol, expiry, multiplier, ib_con_id)`` under a
+        root, active only, ordered by expiry — the nav query's result."""
+        kids = [
+            (sid, r["symbol"], r["expiry"], r["multiplier"], r.get("ib_con_id"))
+            for sid, r in self.stock_rows.items()
+            if r.get("parent_stock_id") == root_id and r.get("is_active", True)
+        ]
+        return sorted(kids, key=lambda k: k[2])
+
+    def apply_price_upsert(self, records):
+        """Model ``price_hourly`` ON CONFLICT (stock_id, timestamp) last-wins.
+
+        Bound to ``ohlcv_store._execute_values`` via monkeypatch in tests so the
+        real ``upsert_hourly_bars`` writes here instead of PostgreSQL. ``records``
+        are ``(stock_id, ts, o, h, l, c, v)`` tuples.
+        """
+        for rec in records:
+            stock_id, ts = rec[0], rec[1]
+            bucket = self.prices.setdefault(stock_id, [])
+            # replace any existing row for this (stock_id, ts)
+            for i, existing in enumerate(bucket):
+                if existing[1] == ts:
+                    bucket[i] = rec
+                    break
+            else:
+                bucket.append(rec)
+            bucket.sort(key=lambda r: r[1])
 
 
 @pytest.fixture

@@ -76,8 +76,21 @@ commands consistent with this lazy-import + Rich-output style.
 
 ### `price_retrival/` — data fetchers (note: directory name is misspelled, keep it)
 
-- `ib_api.py` — `IBStockDataFetcher` context manager; hourly bars in ≤30-day chunks, optional
-  direct Postgres insert via `execute_values`.
+- `ib_api.py` — `IBStockDataFetcher` context manager; hourly bars in ≤30-day chunks. Its
+  `_save_bars_to_db` is now a thin IB adapter that converts the ib-insync DataFrame to candle
+  tuples and delegates the upsert to `ohlcv_store.upsert_hourly_bars` (one shared write path).
+- `ohlcv_store.py` — **source-agnostic** OHLCV candle store, decoupled from any vendor.
+  `upsert_hourly_bars(conn, stock_id, candles)` upserts `(ts, o, h, l, c, v)` tuples into
+  `price_hourly` (same `ON CONFLICT (stock_id, timestamp)` upsert; de-dups a batch last-wins);
+  `read_hourly_bars(conn, stock_id, start, end)` reads them back in `Asset`'s column order. Any
+  source (IB, synthetic, third-party) writes candles through here. The `_execute_values` module
+  symbol is the test seam (monkeypatched to model ON CONFLICT against the FakeDB).
+- `futures.py` — futures registry & navigation for the "contracts-as-stocks" model.
+  `get_or_create_root` / `register_contract` idempotently upsert a root (`sec_type='FUTROOT'`) and
+  its contracts (`sec_type='FUT'`, `parent_stock_id` → root) via `ON CONFLICT (symbol)`, storing
+  the **normalised** symbol (`ESZ26`, never IB's `localSymbol ESZ6`) plus `expiry`/`multiplier`/
+  `ib_con_id`. `get_child_contracts(conn, root_symbol)` is the root→children navigation (ordered
+  by expiry) — the only model function built now; front-month/roll/aggregation are deferred.
 - `edgar_api.py` — `EdgarFundamentalsFetcher`; `XBRL_TAG_MAP` maps DB columns to ordered lists of
   US-GAAP XBRL tags (companies use different tags for the same concept — first match wins).
 - `dividends_api.py` — `EdgarDividendsFetcher` + `IBDividendsFetcher`, dispatched by the
@@ -130,16 +143,27 @@ the package is what triggers registration). `theme.py`, `figures/` (Plotly figur
 - `db_scripts/` — operational SQL: `seed_dev.sql`, `core_expansion_seed.sql`, exports, audits,
   and `migrations/` (apply migrations there as the schema evolves).
 - `db_exports/` — generated CSVs (gitignored).
+- **Futures live in `stocks` as "contracts-as-stocks"** (migration
+  `db_scripts/migrations/add_futures_contract_support.sql`): a self-FK `parent_stock_id` links a
+  contract to its root, and `sec_type` (`STK`/`FUTROOT`/`FUT`), `expiry`, `multiplier` describe
+  it. Each contract (`ESZ26`) and its root (`ES`) are ordinary `stocks` rows with distinct symbols
+  (no clash with `UNIQUE(symbol)`); a contract's candles are just `price_hourly` rows — no new
+  price table. `init.sql` is not yet updated for this (deferred to the schema-reconciliation work);
+  the migration is the source of truth for now.
 
 ## Tests
 
 There are two distinct kinds of tests, kept separate on purpose:
 
 - **`tests/` — the automated pytest suite** (`uv run pytest`). DB-free and network-free: it
-  covers the indicator registry (`indicators.py`), OHLCV resampling (`utils/bars.py`), and the
-  `Asset`/`Market` analysis computations (`data_models.py`). `tests/conftest.py` provides a
-  `FakeConnection`/`FakeDB` that stands in for psycopg2, so the read-only analysis layer is
-  tested without a live PostgreSQL. Config lives in `[tool.pytest.ini_options]` in
+  covers the indicator registry (`indicators.py`), OHLCV resampling (`utils/bars.py`), the
+  `Asset`/`Market` analysis computations (`data_models.py`), and the futures storage/registry
+  layer (`test_futures.py` → `price_retrival/ohlcv_store.py` + `futures.py`). `tests/conftest.py`
+  provides a `FakeConnection`/`FakeDB` that stands in for psycopg2. It began as read-only (the
+  analysis layer only reads) and now also models the futures **write path** — stock upserts,
+  `parent_stock_id` navigation, `commit`/`rollback` no-ops, and a candle ON-CONFLICT model wired
+  in via the `ohlcv_store._execute_values` monkeypatch seam — so storage is tested without a live
+  PostgreSQL. Config lives in `[tool.pytest.ini_options]` in
   `pyproject.toml` (`testpaths = ["tests"]`, `pythonpath = ["."]`). When you add a fetcher-free,
   pure-logic feature, add a unit test here. See `tests/README.md`.
 - **Root `*_test.py` + `dev_test/` — runnable live-DB scripts, *not* pytest** (`market_test.py`,

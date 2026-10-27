@@ -1,0 +1,61 @@
+filters:
+  and:
+    - file.hasProperty("FileType")
+    - FileType == "🚥 Dev Item"
+    - file.folder != "vault/templates"
+views:
+  - type: table
+    name: Board
+    groupBy:
+      property: Status
+      direction: ASC
+    order:
+      - file.name
+      - Type
+      - Priority
+      - Bucket
+      - Cycle
+      - DependsOn
+    columnSize:
+      file.name: 260
+  - type: table
+    name: Backlog
+    filters:
+      and:
+        - Status != "Done"
+        - Status != "Won't Do"
+    order:
+      - file.name
+      - Priority
+      - Type
+      - Bucket
+      - Cycle
+      - DependsOn
+    columnSize:
+      file.name: 260
+  - type: table
+    name: By Bucket
+    groupBy:
+      property: Bucket
+      direction: ASC
+    order:
+      - file.name
+      - Status
+      - Type
+      - Priority
+      - Cycle
+    columnSize:
+      file.name: 260
+  - type: table
+    name: By Cycle
+    groupBy:
+      property: Cycle
+      direction: ASC
+    order:
+      - file.name
+      - Status
+      - Type
+      - Priority
+      - Bucket
+    columnSize:
+      file.name: 260

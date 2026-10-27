@@ -1,18 +1,14 @@
 ---
-tags:
-DevStatus: 
-DependsOn: Flex trades ingest (done)
-DevBucket: data-quality
-ReviewCount:
 FileType: 🚥 Dev Item
-StartDate:
-EndDate: 
+Type: Tech-Debt
+Status: Backlog
 Priority: 🟢
-Dev Status:
+Bucket: data-quality
 Cycle: "1"
-ProjectCodes:
-Requirements:
-Completed: false
+DependsOn: Flex trades ingest (done)
+StartDate: 
+EndDate: 
+tags: 
 ---
 
 # Summary (Tech Debt)

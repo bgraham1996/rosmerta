@@ -1,18 +1,14 @@
 ---
-tags:
-DevStatus: 
-DependsOn: 
-DevBucket: tech-debt
-ReviewCount:
 FileType: 🚥 Dev Item
-StartDate:
-EndDate: 
+Type: Tech-Debt
+Status: Backlog
 Priority: 🔴
-Dev Status:
+Bucket: tech-debt
 Cycle: "1"
-ProjectCodes:
-Requirements:
-Completed: false
+DependsOn: 
+StartDate: 
+EndDate: 
+tags: 
 ---
 
 # Summary (Tech Debt)

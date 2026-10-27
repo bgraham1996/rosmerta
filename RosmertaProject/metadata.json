@@ -1,0 +1,12 @@
+{
+  "version":"1.0.0.0",
+  "version-manifest": {
+    "release-date": "30-08-2026",
+    "release-summary": "This is version 1 so it is mainly just getting the building blocks of the system set up",
+    "project-code": ""
+  },
+  "deployment-manifest": {
+    "components": ["mm", "bl"]
+  },
+  "services": ["psql", "IB", "EDGAR"]
+}

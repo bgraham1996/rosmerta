@@ -10,7 +10,8 @@ Add a new indicator by writing a ``@register``-decorated function that takes a
 price series (or OHLCV DataFrame, e.g. ``obv``/``vwap``) plus keyword params and
 returns a Series/DataFrame aligned to the input index. No other wiring needed.
 
-Built-ins: ``sma``, ``ema``, ``rsi``, ``bollinger``, ``obv``, ``vwap``.
+Built-ins: ``sma``, ``ema``, ``rsi``, ``macd``, ``bollinger``, ``atr``,
+``stochastic``, ``adx``, ``obv``, ``vwap``.
 """
 
 import pandas as pd
@@ -83,6 +84,41 @@ def ema(prices, window):
     return prices.ewm(span=window, adjust=False).mean()
 
 
+@register("ema_arb")
+def ema_arb(prices, s_window=9, l_window=20):
+    """Spread between a short- and long-span EMA (``short - long``).
+
+    Positive when the short EMA sits above the long EMA (bullish alignment),
+    negative when below. Returns a Series aligned to ``prices``' index.
+    """
+    s = prices.ewm(span=s_window, adjust=False).mean()
+    l = prices.ewm(span=l_window, adjust=False).mean()
+    return s - l
+
+@register("rsi_ema_cross")
+def rsi_ema_cross(prices, s_window=9, l_window=20, rsi_window=14, oversold=30):
+    """Bullish EMA cross confirmed by an oversold RSI: ``1`` on the trigger bar, else ``0``.
+
+    Fires (``1``) on a bar where the short-span EMA crosses *above* the long-span
+    EMA (the ``short - long`` spread turns positive after being ``<= 0`` on the
+    prior bar) **and** RSI on that same bar is oversold (``< oversold``). Every
+    other bar is ``0``. The oversold filter makes this a long-entry setup: a
+    bullish cross that arrives while the stock is still beaten down.
+
+    Returns an int Series (0/1) aligned to ``prices``' index. Bars where RSI is
+    still warming up (NaN) never trigger, so they read ``0``.
+    """
+    s = prices.ewm(span=s_window, adjust=False).mean()
+    l = prices.ewm(span=l_window, adjust=False).mean()
+    spread = s - l
+    cross_up = (spread > 0) & (spread.shift(1) <= 0)
+
+    rsi_vals = rsi(prices, window=rsi_window)
+    oversold_now = rsi_vals < oversold  # NaN comparisons are False → no trigger
+
+    return (cross_up & oversold_now).astype(int)
+
+
 @register("bollinger")
 def bollinger(prices, window=20, num_std=2):
     """Bollinger Bands as a DataFrame of ``upper``/``middle``/``lower``.
@@ -119,6 +155,100 @@ def vwap(data, window=20):
     """
     typical_price = (data['close'] + data['high'] + data['low']) / 3
     return (typical_price * data['volume']).rolling(window).sum() / data['volume'].rolling(window).sum()
+
+
+@register("macd")
+def macd(prices, fast=12, slow=26, signal=9):
+    """MACD as a DataFrame of ``macd``/``signal``/``histogram``.
+
+    ``macd`` is the difference of the fast and slow EMAs; ``signal`` is the
+    EMA of the ``macd`` line over ``signal`` periods; ``histogram`` is
+    ``macd - signal``. All EMAs use ``adjust=False`` to match ``ema``.
+    """
+    fast_ema = prices.ewm(span=fast, adjust=False).mean()
+    slow_ema = prices.ewm(span=slow, adjust=False).mean()
+    macd_line = fast_ema - slow_ema
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    return pd.DataFrame({
+        'macd': macd_line,
+        'signal': signal_line,
+        'histogram': macd_line - signal_line,
+    })
+
+
+def _true_range(data):
+    """Wilder's True Range from an OHLC DataFrame.
+
+    ``max`` of the current high-low range and each end's gap to the prior
+    close: ``max(high-low, |high-prev_close|, |low-prev_close|)``. Shared by
+    ``atr`` and ``adx``; the first bar has no prior close so falls back to the
+    plain high-low range. Not registered — a helper, not an indicator.
+    """
+    high, low, close = data['high'], data['low'], data['close']
+    prev_close = close.shift(1)
+    ranges = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs(),
+    ], axis=1)
+    return ranges.max(axis=1)
+
+
+@register("atr")
+def atr(data, window=14):
+    """Average True Range (Wilder) from an OHLC DataFrame.
+
+    Wilder-smoothed (``ewm`` with ``alpha=1/window``) mean of the True Range;
+    a volatility measure in price units, useful for sizing stops.
+    """
+    tr = _true_range(data)
+    return tr.ewm(alpha=1/window, min_periods=window, adjust=False).mean()
+
+
+@register("stochastic")
+def stochastic(data, k=14, d=3):
+    """Stochastic oscillator as a DataFrame of ``k`` (%K) and ``d`` (%D).
+
+    %K positions the close within the ``k``-bar high/low range
+    (``100 * (close - lowest_low) / (highest_high - lowest_low)``); %D is the
+    ``d``-period SMA of %K. Both range 0–100 (low = oversold).
+    """
+    high, low, close = data['high'], data['low'], data['close']
+    lowest = low.rolling(k).min()
+    highest = high.rolling(k).max()
+    percent_k = 100 * (close - lowest) / (highest - lowest)
+    percent_d = percent_k.rolling(d).mean()
+    return pd.DataFrame({'k': percent_k, 'd': percent_d})
+
+
+@register("adx")
+def adx(data, window=14):
+    """Average Directional Index with +DI/-DI (Wilder) from an OHLC DataFrame.
+
+    Returns a DataFrame of ``adx``/``plus_di``/``minus_di``. ``adx`` measures
+    trend *strength* (0–100, higher = stronger trend regardless of direction);
+    ``plus_di > minus_di`` indicates an up-trend. Directional movement and the
+    true range are Wilder-smoothed (``ewm`` with ``alpha=1/window``).
+    """
+    high, low = data['high'], data['low']
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = pd.Series(
+        np.where((up_move > down_move) & (up_move > 0), up_move, 0.0),
+        index=data.index,
+    )
+    minus_dm = pd.Series(
+        np.where((down_move > up_move) & (down_move > 0), down_move, 0.0),
+        index=data.index,
+    )
+
+    atr_ = _true_range(data).ewm(alpha=1/window, min_periods=window, adjust=False).mean()
+    plus_di = 100 * plus_dm.ewm(alpha=1/window, min_periods=window, adjust=False).mean() / atr_
+    minus_di = 100 * minus_dm.ewm(alpha=1/window, min_periods=window, adjust=False).mean() / atr_
+
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di)
+    adx_ = dx.ewm(alpha=1/window, min_periods=window, adjust=False).mean()
+    return pd.DataFrame({'adx': adx_, 'plus_di': plus_di, 'minus_di': minus_di})
 
 
 # None typucal 'indicators, ie just things I want to calculate'
@@ -160,4 +290,49 @@ def days_offset_gain(data, days_ahead=20, bars_per_day=8, mode='pct', offset_col
 
     # Realign to the order the caller handed us.
     return values.reindex(data.index)
+
+
+@register("trading_days_offset_gain")
+def trading_days_offset_gain(data, days_ahead=20, offset_column='close'):
+    """Forward gain ``days_ahead`` *trading days* ahead at the **same bar time**.
+
+    For each bar the target is the bar with the identical time-of-day
+    ``days_ahead`` market-open days later. Time-of-day is measured in US/Eastern
+    so it tracks the market session and stays aligned across DST (in UTC a
+    session's time-of-day would jump an hour twice a year). Trading days are
+    taken from the data itself: bars are grouped by that Eastern time-of-day and
+    shifted ``days_ahead`` positions within each (date-ordered) group, so
+    weekends and holidays — which have no bars to occupy a slot — are skipped
+    automatically. Only exact same-time matches count: where the target bar is
+    absent (the tail of the series, or a data gap) the value is NaN.
+
+    Requires an OHLCV DataFrame with a ``timestamp`` column (call via
+    ``source=['timestamp', <col>]``). Returns a DataFrame with two columns,
+    ``abs`` (raw price difference) and ``pct`` (fractional return), aligned to
+    the caller's index.
+    """
+    if data.empty:
+        return pd.DataFrame(
+            {'abs': pd.Series(dtype='float64'), 'pct': pd.Series(dtype='float64')},
+            index=data.index,
+        )
+
+    current = data[offset_column].astype('float64')
+
+    # Measure time-of-day in US/Eastern so "same bar time" follows the market
+    # session, not the wall clock: a 09:30 ET bar stays grouped with other 09:30
+    # ET bars across the two yearly DST shifts (its UTC time-of-day would jump an
+    # hour). Sorting keeps each group date-ordered; the original index labels are
+    # preserved so we can realign to the caller's row order at the end.
+    eastern = pd.to_datetime(data['timestamp'], utc=True).dt.tz_convert('America/New_York')
+    ordered = pd.DataFrame(
+        {'ts': eastern, 'price': current}
+    ).sort_values('ts', kind='stable')
+    tod = ordered['ts'].dt.strftime('%H:%M:%S')
+    future = ordered.groupby(tod, sort=False)['price'].shift(-days_ahead)
+    future = future.reindex(data.index)
+
+    abs_gain = future - current
+    pct_gain = abs_gain / current
+    return pd.DataFrame({'abs': abs_gain, 'pct': pct_gain}, index=data.index)
 

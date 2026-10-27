@@ -13,6 +13,7 @@ import pytest
 
 from indicators import (
     Indicator, _REGISTRY, sma, ema, rsi, bollinger, obv, vwap, days_offset_gain,
+    trading_days_offset_gain, rsi_ema_cross, macd, atr, stochastic, adx,
 )
 
 
@@ -157,6 +158,164 @@ def test_days_offset_gain_unknown_mode_raises(offset_frame):
         days_offset_gain(offset_frame, mode="median")
 
 
+# --- trading_days_offset_gain (same-time, business-day lookahead) -------------
+
+
+@pytest.fixture
+def tradingday_frame():
+    """Two bars/day (09:00, 15:00) over four trading days spanning a weekend.
+
+    Thu 04, Fri 05, Mon 08, Tue 09 Jan 2024 — Sat/Sun (06/07) have no bars, so
+    the same-time-of-day shift skips them without any calendar bookkeeping.
+    """
+    ts = pd.to_datetime(
+        [
+            "2024-01-04 09:00", "2024-01-04 15:00",
+            "2024-01-05 09:00", "2024-01-05 15:00",
+            "2024-01-08 09:00", "2024-01-08 15:00",
+            "2024-01-09 09:00", "2024-01-09 15:00",
+        ]
+    ).tz_localize("UTC")
+    return pd.DataFrame(
+        {"timestamp": ts, "close": [10.0, 100.0, 20.0, 200.0, 40.0, 400.0, 80.0, 800.0]}
+    )
+
+
+def test_trading_days_offset_gain_skips_weekends(tradingday_frame):
+    out = trading_days_offset_gain(tradingday_frame, days_ahead=2)
+    assert list(out.columns) == ["abs", "pct"]
+    # 09:00 group [10,20,40,80] shifted 2 trading days (Thu->Mon over the
+    # weekend) -> future [40,80,nan,nan]; 15:00 group [100,200,400,800] ->
+    # [400,800,nan,nan]. Rows interleave 09:00,15:00,...
+    np.testing.assert_allclose(
+        out["abs"].to_numpy(), [30.0, 300.0, 60.0, 600.0, np.nan, np.nan, np.nan, np.nan]
+    )
+    np.testing.assert_allclose(
+        out["pct"].to_numpy(), [3.0, 3.0, 3.0, 3.0, np.nan, np.nan, np.nan, np.nan]
+    )
+
+
+def test_trading_days_offset_gain_exact_time_only(tradingday_frame):
+    # Drop the Mon 09:00 bar: the Thu 09:00 -> (2 trading days) target no longer
+    # exists at 09:00, so within the 09:00 group the shift now reaches Tue 09:00
+    # (still exact same time). The point: values only ever come from same-time bars.
+    frame = tradingday_frame.drop(index=4).reset_index(drop=True)  # remove Mon 09:00
+    out = trading_days_offset_gain(frame, days_ahead=2)
+    # 09:00 group is now [Thu 10, Fri 20, Tue 80]; shift(-2): Thu->Tue(80), rest nan.
+    nine = out.loc[frame["timestamp"].dt.strftime("%H:%M:%S") == "09:00:00", "abs"]
+    np.testing.assert_allclose(nine.to_numpy(), [70.0, np.nan, np.nan])
+
+
+def test_trading_days_offset_gain_realigns_shuffled_input(tradingday_frame):
+    shuffled = tradingday_frame.sample(frac=1, random_state=0)
+    result = trading_days_offset_gain(shuffled, days_ahead=2)
+    expected = trading_days_offset_gain(tradingday_frame, days_ahead=2)
+    for idx in tradingday_frame.index:
+        for col in ("abs", "pct"):
+            a, b = result.loc[idx, col], expected.loc[idx, col]
+            assert (math.isnan(a) and math.isnan(b)) or a == b
+
+
+def test_trading_days_offset_gain_empty():
+    empty = pd.DataFrame({"timestamp": pd.to_datetime([]), "close": []})
+    out = trading_days_offset_gain(empty)
+    assert list(out.columns) == ["abs", "pct"]
+    assert len(out) == 0
+
+
+def test_trading_days_offset_gain_aligns_across_dst():
+    # One session bar (10:00 America/New_York) spanning the 2024 spring-forward
+    # (10 Mar). In UTC that bar is 15:00 before DST (EST) but 14:00 after (EDT),
+    # so grouping by UTC time-of-day would split it into two groups and strand the
+    # pre-DST bar; grouping by Eastern time keeps them one session so the shift
+    # connects across the boundary.
+    ts = pd.to_datetime(
+        [
+            "2024-03-08 15:00",  # Fri, EST -> 10:00 ET
+            "2024-03-11 14:00",  # Mon, EDT -> 10:00 ET
+            "2024-03-12 14:00",  # Tue, EDT -> 10:00 ET
+            "2024-03-13 14:00",  # Wed, EDT -> 10:00 ET
+        ]
+    ).tz_localize("UTC")
+    frame = pd.DataFrame({"timestamp": ts, "close": [10.0, 20.0, 40.0, 80.0]})
+    out = trading_days_offset_gain(frame, days_ahead=1)
+    # All four are the same 10:00 ET session -> one group -> shift(-1):
+    # future [20,40,80,nan]. The pre-DST Fri bar (idx 0) MUST be non-NaN.
+    np.testing.assert_allclose(out["abs"].to_numpy(), [10.0, 20.0, 40.0, np.nan])
+    np.testing.assert_allclose(out["pct"].to_numpy(), [1.0, 1.0, 1.0, np.nan])
+
+
+# --- rsi_ema_cross (bullish EMA cross gated by oversold RSI) ------------------
+
+
+@pytest.fixture
+def oversold_cross_closes():
+    """A long steady decline (RSI-14 deeply oversold) then a brisk uptick that a
+    fast 2/4 EMA pair crosses on while RSI is still down in oversold territory.
+
+    Engineered so the bullish cross and the oversold reading coincide on one
+    bar (index 31) — the setup the indicator is meant to flag.
+    """
+    down = list(np.linspace(100, 55, 30))
+    up = [57.0, 60.0, 64.0, 69.0]
+    return pd.Series(down + up)
+
+
+def test_rsi_ema_cross_is_binary_int(oversold_cross_closes):
+    out = rsi_ema_cross(oversold_cross_closes, s_window=2, l_window=4)
+    assert set(pd.unique(out)).issubset({0, 1})
+    assert out.dtype.kind in ("i", "u")
+
+
+def test_rsi_ema_cross_fires_on_oversold_cross(oversold_cross_closes):
+    out = rsi_ema_cross(
+        oversold_cross_closes, s_window=2, l_window=4, rsi_window=14, oversold=30
+    )
+    # Exactly one trigger, on the bar where the bullish cross meets oversold RSI.
+    assert out.sum() == 1
+    assert out.iloc[31] == 1
+    # That bar is a genuine cross-up (spread turns positive) with RSI < 30.
+    spread = ema(oversold_cross_closes, window=2) - ema(oversold_cross_closes, window=4)
+    assert spread.iloc[31] > 0 and spread.iloc[30] <= 0
+    assert rsi(oversold_cross_closes, window=14).iloc[31] < 30
+
+
+def test_rsi_ema_cross_rsi_gate_blocks(oversold_cross_closes):
+    # RSI at the cross is ~22.7; a stricter oversold=20 gate is unmet, so the
+    # cross is suppressed and the whole series reads 0.
+    out = rsi_ema_cross(
+        oversold_cross_closes, s_window=2, l_window=4, rsi_window=14, oversold=20
+    )
+    assert (out == 0).all()
+
+
+def test_rsi_ema_cross_isolates_crosses_when_gate_open(oversold_cross_closes):
+    # An always-true RSI gate (< 101) reduces the signal to the raw bullish
+    # cross-ups, isolating the cross-detection half of the logic.
+    out = rsi_ema_cross(oversold_cross_closes, s_window=2, l_window=4, oversold=101)
+    spread = ema(oversold_cross_closes, window=2) - ema(oversold_cross_closes, window=4)
+    cross_up = ((spread > 0) & (spread.shift(1) <= 0)).astype(int)
+    pd.testing.assert_series_equal(out, cross_up, check_names=False)
+
+
+def test_rsi_ema_cross_matches_manual_and():
+    # General cross-check: the output is exactly the elementwise AND of a bullish
+    # cross and an oversold RSI, on an independent reversal series.
+    closes = pd.Series(np.concatenate([np.linspace(100, 60, 25), np.linspace(61, 90, 25)]))
+    out = rsi_ema_cross(closes, s_window=9, l_window=20, rsi_window=14, oversold=60)
+    spread = ema(closes, window=9) - ema(closes, window=20)
+    cross_up = (spread > 0) & (spread.shift(1) <= 0)
+    oversold = rsi(closes, window=14) < 60
+    expected = (cross_up & oversold).astype(int)
+    pd.testing.assert_series_equal(out, expected, check_names=False)
+
+
+def test_rsi_ema_cross_uptrend_no_signal():
+    # A pure uptrend is never oversold and has no post-warmup bullish cross.
+    out = rsi_ema_cross(pd.Series(np.linspace(10.0, 100.0, 60)))
+    assert (out == 0).all()
+
+
 # --- Indicator wrapper -----------------------------------------------------
 
 
@@ -182,5 +341,84 @@ def test_indicator_compute_caches_result(closes):
 
 
 def test_builtins_are_registered():
-    for name in ["sma", "ema", "rsi", "bollinger", "obv", "vwap", "days_offset_gain"]:
+    for name in ["sma", "ema", "rsi", "bollinger", "obv", "vwap", "days_offset_gain",
+                 "rsi_ema_cross", "macd", "atr", "stochastic", "adx"]:
         assert name in _REGISTRY
+
+
+def test_macd_structure_and_relations():
+    s = pd.Series(np.arange(1, 60, dtype=float))
+    result = macd(s, fast=12, slow=26, signal=9)
+    assert list(result.columns) == ["macd", "signal", "histogram"]
+    # macd line is fast EMA minus slow EMA; histogram is macd minus signal.
+    np.testing.assert_allclose(
+        result["macd"].to_numpy(), (ema(s, 12) - ema(s, 26)).to_numpy()
+    )
+    np.testing.assert_allclose(
+        result["histogram"].to_numpy(),
+        (result["macd"] - result["signal"]).to_numpy(),
+    )
+    # On a strictly rising series the fast EMA leads the slow → macd > 0.
+    assert (result["macd"].iloc[26:] > 0).all()
+
+
+def test_atr_matches_true_range_mean():
+    # With window=1, Wilder ATR is just the True Range itself.
+    data = pd.DataFrame(
+        {
+            "high": [10.0, 11.0, 12.0, 11.5],
+            "low": [9.0, 9.5, 10.0, 10.5],
+            "close": [9.5, 10.5, 11.0, 11.0],
+        }
+    )
+    result = atr(data, window=1)
+    prev_close = data["close"].shift(1)
+    tr = pd.concat(
+        [
+            data["high"] - data["low"],
+            (data["high"] - prev_close).abs(),
+            (data["low"] - prev_close).abs(),
+        ],
+        axis=1,
+    ).max(axis=1)
+    np.testing.assert_allclose(result.to_numpy(), tr.to_numpy())
+    # ATR is non-negative everywhere it is defined.
+    assert (atr(data, window=2).dropna() >= 0).all()
+
+
+def test_stochastic_bounds_and_extremes():
+    rng = np.random.default_rng(1)
+    highs = np.cumsum(np.abs(rng.standard_normal(100))) + 100
+    data = pd.DataFrame(
+        {
+            "high": highs + 1,
+            "low": highs - 1,
+            "close": highs,
+        }
+    )
+    result = stochastic(data, k=14, d=3)
+    assert list(result.columns) == ["k", "d"]
+    k = result["k"].dropna()
+    assert ((k >= 0) & (k <= 100)).all()
+    # Close at the top of its k-bar range → %K == 100.
+    top = pd.DataFrame(
+        {"high": [1, 2, 3.0], "low": [0, 1, 2.0], "close": [1, 2, 3.0]}
+    )
+    np.testing.assert_allclose(stochastic(top, k=3, d=1)["k"].iloc[-1], 100.0)
+
+
+def test_adx_structure_and_direction():
+    # A strong, steady up-trend: +DI should dominate -DI.
+    n = 60
+    up = pd.DataFrame(
+        {
+            "high": np.arange(2, n + 2, dtype=float),
+            "low": np.arange(1, n + 1, dtype=float),
+            "close": np.arange(1.5, n + 1.5, dtype=float),
+        }
+    )
+    result = adx(up, window=14)
+    assert list(result.columns) == ["adx", "plus_di", "minus_di"]
+    tail = result.dropna()
+    assert (tail["plus_di"] > tail["minus_di"]).all()
+    assert ((tail["adx"] >= 0) & (tail["adx"] <= 100)).all()
