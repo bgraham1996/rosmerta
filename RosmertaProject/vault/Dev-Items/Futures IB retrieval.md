@@ -34,10 +34,12 @@ Probed with `ib-insync` 0.9.86 using a dedicated `clientId` (read-only: `reqCont
 - **Continuous series exists in IB:** `ContFuture('ES','CME')` qualifies to the current front month (`secType='CONTFUT'`, same `conId` as the front contract). A candidate producer for a future `CONTFUT` child row — but roll/aggregation is deferred (see [[Futures asset data retrival and storage]]).
 
 # Development Plan
-**Phase A — single named contract (the first real end-to-end path):**
-- [ ] Add a futures fetch path alongside `get_hourly_bars` (either a `get_futures_hourly_bars` method or a `sec_type`-aware branch) that builds `Future(root, lastTradeDateOrContractMonth, exchange=..., currency=...)` instead of `Stock`, qualifies it, and fetches with `useRTH=False`, `whatToShow='TRADES'`, `barSizeSetting='1 hour'`, reusing the 30-day chunking loop.
-- [ ] Normalise bar timestamps to UTC before handing `(ts,o,h,l,c,v)` tuples to `ohlcv_store.upsert_hourly_bars` (do **not** reuse the equity `.replace(tzinfo=None)` drop — that assumes exchange tz == UTC).
-- [ ] Register the contract via `futures.register_contract(...)` with the **constructed** normalised symbol (`ESZ26`), `expiry`, `multiplier`, and `ib_con_id=conId`; write candles against the returned `stock_id`.
+**Phase A — single named contract (the first real end-to-end path):** *(built 2026-10-27; unit-tested; live gateway verify pending)*
+- [x] Add a futures fetch path alongside `get_hourly_bars` — `IBStockDataFetcher.get_futures_hourly_bars(root, expiry, exchange, ...)`: builds `Future(root, lastTradeDateOrContractMonth, exchange, currency)` instead of `Stock`, qualifies it (bare root rejected as ambiguous), fetches with `useRTH=False`, `whatToShow='TRADES'`, `barSizeSetting='1 hour'`, reusing the 30-day chunking loop.
+- [x] **UTC decision made (user-confirmed): convert to UTC before storing.** `_to_utc_naive` converts each tz-aware exchange-local bar to naive-UTC before `ohlcv_store.upsert_hourly_bars` — deliberately **not** the equity `.replace(tzinfo=None)` drop (which assumes exchange tz == UTC).
+- [x] Register the contract via `futures.register_contract(...)` with the **constructed** normalised symbol (`normalise_future_symbol`, e.g. `ESZ26`), `expiry`, `multiplier`, and `ib_con_id=conId`; candles written against the returned `stock_id`.
+- [x] Pure, IB-free symbol normalisation helper `futures.normalise_future_symbol(root, last_trade_date)` with unit tests (YYYYMMDD/YYYYMM/date inputs, quarterly month codes, bad-input rejection).
+- [ ] **Live end-to-end verification against IB Gateway** — blocked 2026-10-27: gateway API handshake timed out (TCP 4001 open, handshake hangs; likely a pending "accept connection" dialog / dropped session). Re-run `get_futures_hourly_bars('ES', '20261218', 'CME', ...)` once the gateway accepts API clients.
 
 **Phase B — term-structure registration:**
 - [ ] `reqContractDetails(Future(root, exchange=..., includeExpired=False))` → register the root (`futures.get_or_create_root`) and all live child contracts in one pass (idempotent `ON CONFLICT (symbol)`), each carrying its `conId`/`expiry`/`multiplier`.

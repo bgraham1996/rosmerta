@@ -25,6 +25,39 @@ rather than duplicating it.
 """
 
 
+# CME / IB futures month codes (Jan..Dec). Vendor-neutral: these are the
+# standard delivery-month letters, the same set IB encodes into ``localSymbol``.
+_MONTH_CODES = {1: 'F', 2: 'G', 3: 'H', 4: 'J', 5: 'K', 6: 'M',
+                7: 'N', 8: 'Q', 9: 'U', 10: 'V', 11: 'X', 12: 'Z'}
+
+
+def normalise_future_symbol(root, last_trade_date):
+    """Build the canonical contract symbol (e.g. ``'ESZ26'``) for a root + expiry.
+
+    ``last_trade_date`` is IB's ``lastTradeDateOrContractMonth`` — accepted as a
+    ``'YYYYMMDD'`` or ``'YYYYMM'`` string, or a ``date`` / ``datetime``. The
+    symbol is ``root + <month code> + <2-digit year>``.
+
+    We deliberately construct this from the **full expiry** rather than reuse
+    IB's ``localSymbol`` (``ESZ6``): its single-digit year is ambiguous across
+    decades, whereas the contract month gives an unambiguous year. This is the
+    "DB stores the normalised id, vendor ids map in" rule (the IB ``conId`` goes
+    to ``ib_con_id``, never the symbol).
+    """
+    if hasattr(last_trade_date, 'year'):          # date / datetime
+        year, month = last_trade_date.year, last_trade_date.month
+    else:
+        s = str(last_trade_date).strip()
+        if len(s) not in (6, 8) or not s.isdigit():
+            raise ValueError(
+                f"last_trade_date must be YYYYMM / YYYYMMDD or a date, got {last_trade_date!r}"
+            )
+        year, month = int(s[:4]), int(s[4:6])
+    if month not in _MONTH_CODES:
+        raise ValueError(f"invalid contract month {month} in {last_trade_date!r}")
+    return f"{root}{_MONTH_CODES[month]}{year % 100:02d}"
+
+
 def resolve_stock_id(conn, symbol):
     """Return the ``stock_id`` for a symbol (root, contract, or equity), or None."""
     with conn.cursor() as cur:

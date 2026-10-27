@@ -172,3 +172,31 @@ def test_upsert_empty_is_noop(priced):
     db, conn = priced
     assert ohlcv_store.upsert_hourly_bars(conn, 42, []) == 0
     assert 42 not in db.prices
+
+
+# --------------------------------------------------------------------------
+# Symbol normalisation (price_retrival.futures.normalise_future_symbol)
+# Pure, IB-free: the IB -> canonical-symbol mapping used by the fetcher.
+# --------------------------------------------------------------------------
+def test_normalise_future_symbol_from_yyyymmdd():
+    # IB's localSymbol would be the ambiguous 'ESZ6'; we build 'ESZ26'.
+    assert futures.normalise_future_symbol("ES", "20261218") == "ESZ26"
+
+
+def test_normalise_future_symbol_quarterly_month_codes():
+    # ES quarterly cycle H/M/U/Z = Mar/Jun/Sep/Dec.
+    assert futures.normalise_future_symbol("ES", "20270319") == "ESH27"
+    assert futures.normalise_future_symbol("ES", "20270617") == "ESM27"
+    assert futures.normalise_future_symbol("ES", "20270917") == "ESU27"
+
+
+def test_normalise_future_symbol_accepts_yyyymm_and_date():
+    assert futures.normalise_future_symbol("CL", "202601") == "CLF26"
+    assert futures.normalise_future_symbol("ES", datetime(2026, 12, 18)) == "ESZ26"
+
+
+def test_normalise_future_symbol_rejects_bad_input():
+    with pytest.raises(ValueError):
+        futures.normalise_future_symbol("ES", "2026")       # too short
+    with pytest.raises(ValueError):
+        futures.normalise_future_symbol("ES", "20261318")   # month 13
