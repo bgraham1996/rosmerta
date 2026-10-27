@@ -657,6 +657,53 @@ def futures_fetch(root, expiry, exchange, currency, start, end, no_db):
         console.print("[yellow]Database storage skipped (--no-db)[/yellow]")
 
 
+@futures.command('continuous')
+@click.argument('root')
+@click.option('--symbol', default=None,
+              help='Continuous series symbol (default: <ROOT>.c1)')
+def futures_continuous(root, symbol):
+    """Build + store a root's continuous series from its registered contracts.
+
+    Splices the root's contracts (already fetched into the DB) into one gap-free
+    series using a volume roll + ratio back-adjustment, stored as a CONTFUT child
+    (e.g. ES.c1). Fetch the contracts first with `futures fetch`. No IB call.
+
+    Example: rosmerta futures continuous ES
+    """
+    import psycopg2
+    from price_retrival.continuous import build_and_store_continuous
+
+    root = root.upper()
+    console.print(f"[cyan]Building continuous series for {root}[/cyan] (volume roll + ratio adjust)…")
+
+    conn = psycopg2.connect(**get_db_config())
+    try:
+        result = build_and_store_continuous(conn, root, series_symbol=symbol)
+    finally:
+        conn.close()
+
+    if result is None:
+        console.print(f"[yellow]Nothing to build for {root} — no contracts with candles. "
+                      f"Fetch some first (e.g. `futures fetch {root}`).[/yellow]")
+        return
+
+    console.print(
+        f"[green]✓ {result['symbol']}[/green] — {result['bars']:,} bars from "
+        f"{len(result['contracts'])} contract(s): {', '.join(result['contracts'])}"
+    )
+    if result['rolls']:
+        table = Table(title=f"{result['symbol']} — Roll schedule")
+        table.add_column("From", style="cyan")
+        table.add_column("To", style="cyan")
+        table.add_column("Roll (UTC)", style="dim")
+        table.add_column("Ratio", justify="right", style="yellow")
+        for r in result['rolls']:
+            table.add_row(r['from'], r['to'], str(r['roll_ts']), f"{r['ratio']:.4f}")
+        console.print(table)
+    else:
+        console.print("[dim]Single active contract — no rolls (series = front month).[/dim]")
+
+
 # ─── Shared bulk fetch logic ───────────────────────────────
 def _resolve_watchlist(list_name):
     """Resolve a watchlist name to its tickers. Returns tickers or None."""

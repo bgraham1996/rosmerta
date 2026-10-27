@@ -349,7 +349,7 @@ class IBStockDataFetcher:
 
     def get_futures_hourly_bars(self, root, expiry, exchange,
                                 currency='USD', start_date=None, end_date=None,
-                                save_to_db=True):
+                                save_to_db=True, include_expired=False):
         """Fetch hourly OHLCV bars for a single named futures contract and store
         them (UTC) under the contracts-as-stocks model.
 
@@ -384,7 +384,10 @@ class IBStockDataFetcher:
                         else datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc))
 
             # Qualify the specific contract (root + expiry → single conId).
-            contract = Future(root, str(expiry), exchange, currency=currency)
+            # include_expired lets us backfill already-expired contracts (needed
+            # for a continuous series spanning past rolls).
+            contract = Future(root, str(expiry), exchange, currency=currency,
+                              includeExpired=include_expired)
             qualified = self.ib.qualifyContracts(contract)
             if not qualified:
                 self.logger.error(

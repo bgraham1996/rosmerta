@@ -229,13 +229,40 @@ def get_child_contracts(conn, root_symbol, active_only=True):
     if root_id is None:
         return []
     sql = ("SELECT stock_id, symbol, expiry, multiplier, ib_con_id "
-           "FROM stocks WHERE parent_stock_id = %s")
+           "FROM stocks WHERE parent_stock_id = %s AND sec_type = 'FUT'")
     if active_only:
         sql += " AND is_active = TRUE"
     sql += " ORDER BY expiry ASC"
     with conn.cursor() as cur:
         cur.execute(sql, (root_id,))
         return cur.fetchall()
+
+
+def register_continuous(conn, root_symbol, symbol, name=None,
+                        exchange='CME', currency='USD'):
+    """Idempotently register a **continuous-series** child (``sec_type='CONTFUT'``).
+
+    A derived series (e.g. ``ES.c1``) under the root — its candles are produced by
+    ``price_retrival.continuous`` (volume roll + ratio adjustment) and stored like
+    any other ``price_hourly`` rows. Distinct from the raw ``FUT`` contracts, which
+    remain the source of truth. Creates the root on demand. Returns its ``stock_id``.
+    """
+    root_id = resolve_stock_id(conn, root_symbol)
+    if root_id is None:
+        root_id = get_or_create_root(conn, root_symbol, exchange=exchange, currency=currency)
+    with conn.cursor() as cur:
+        cur.execute(
+            """INSERT INTO stocks (symbol, name, exchange, currency, sec_type, parent_stock_id)
+               VALUES (%s, %s, %s, %s, 'CONTFUT', %s)
+               ON CONFLICT (symbol) DO UPDATE SET
+                   sec_type        = 'CONTFUT',
+                   parent_stock_id = EXCLUDED.parent_stock_id
+               RETURNING stock_id""",
+            (symbol, name or symbol, exchange, currency, root_id),
+        )
+        stock_id = cur.fetchone()[0]
+    conn.commit()
+    return stock_id
 
 
 def get_front_contract(conn, root_symbol, as_of=None, active_only=True):

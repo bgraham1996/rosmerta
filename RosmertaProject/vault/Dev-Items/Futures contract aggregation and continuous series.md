@@ -1,16 +1,20 @@
 ---
 FileType: 🚥 Dev Item
 Type: Feature
-Status: Backlog
+Status: In Progress
 Priority: 🟡
 Bucket: analysis
 Cycle: "3"
 DependsOn: Futures IB retrieval
-StartDate: 
+StartDate: 2026-10-27
 EndDate: 
 tags: 
 ---
-> [!note] Design write-up 2026-10-27. Captures the overlapping-contract aggregation problem that was flagged as the key deferred prerequisite in [[Futures asset data retrival and storage]]. No code yet — this item is the design to agree before building.
+> [!success] Built 2026-10-27 (volume roll + ratio back-adjustment, user-confirmed). `price_retrival/continuous.py`: pure `build_continuous(contracts)` (volume-crossover roll schedule + proportional back-adjustment, anchor = newest/front) + DB driver `build_and_store_continuous(conn, root)` that reads the raw `FUT` contracts and persists a `CONTFUT` child (`<root>.c1`). `futures.register_continuous` + migration `add_contfut_sec_type.sql` (allow `CONTFUT` in `sec_type`, applied to `rosmerta__prod`). CLI `futures continuous <ROOT>`. 6 unit tests on the pure builder. **Live-verified** across the real Sep-2026 ES roll: fetched ESU26 (expired, via new `include_expired`) + ESZ26, built `ES.c1` (1263 bars); **volume roll at 2026-09-14**, **ratio 1.00879** (contango), continuity step at the join **0.042%** (vs the ~0.88% raw gap), anchor close == raw front close. Cleaned up after.
+>
+> **Still open (below):** persisting the roll schedule to a table, OI-based roll, second-month (`.c2`) series, session-aware resampling, and `Asset`/`Market` consumption ([[Futures in Asset and Market]]).
+
+> [!note] Original design write-up 2026-10-27 (kept for rationale). The overlapping-contract aggregation problem flagged as the key deferred prerequisite in [[Futures asset data retrival and storage]].
 
 # Summary
 We now store each futures contract as its own `stocks` row with its own `price_hourly` candles ([[Futures OHLCV storage and retrieval]], [[Futures IB retrieval]] Phases A–D). But a single root (`ES`) has **many contracts whose price history overlaps** — at any moment several are live and liquid. To get **one continuous series per root** (for charts, indicators, backtests, cross-asset work) we must decide **(1) when to roll** from one contract to the next and **(2) how to splice** their prices across the roll. This is the prerequisite for *both* a **fetchable root** and a **continuous series** — deferred since [[Futures asset data retrival and storage]].
