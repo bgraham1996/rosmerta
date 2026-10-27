@@ -473,6 +473,61 @@ class IBStockDataFetcher:
             return None
 
     # ---------------------------------------------------------
+    # Futures — Phase B: term-structure registration
+    # ---------------------------------------------------------
+    def register_futures_term_structure(self, root, exchange, currency='USD',
+                                        include_expired=False, name=None):
+        """Enumerate a futures root's live contracts and register the whole term
+        structure (root + every contract) in one idempotent pass.
+
+        Uses ``reqContractDetails(Future(root, exchange=...))`` — the clean way to
+        get the full chain (one call returns every live contract with its
+        ``conId`` / ``lastTradeDateOrContractMonth`` / ``multiplier``), avoiding
+        the ambiguity of qualifying a bare root. Each contract is mapped by the
+        pure ``futures.normalise_ib_future`` and persisted via
+        ``futures.register_term_structure``. **No candles are fetched here** — this
+        is the registration pass; pull bars per contract with
+        ``get_futures_hourly_bars``.
+
+        Returns a list of ``(normalised_symbol, stock_id)`` (expiry order), or
+        ``None`` on connection error / ``[]`` if the root has no contracts.
+        """
+        try:
+            if not self.ib.isConnected():
+                if not self.connect():
+                    return None
+
+            details = self.ib.reqContractDetails(
+                Future(root, exchange=exchange, currency=currency,
+                       includeExpired=include_expired)
+            )
+            if not details:
+                self.logger.warning(f"No contracts found for futures root {root} on {exchange}")
+                return []
+
+            contracts = [futures_registry.normalise_ib_future(cd.contract) for cd in details]
+            self.logger.info(
+                f"Enumerated {len(contracts)} {root} contracts on {exchange}: "
+                f"{', '.join(sorted(c['symbol'] for c in contracts))}"
+            )
+
+            if not self.db_config:
+                self.logger.warning("No db_config — term structure not persisted")
+                return []
+            if not self.db_conn or self.db_conn.closed:
+                self.connect_db()
+
+            results = futures_registry.register_term_structure(
+                self.db_conn, root, contracts, name=name
+            )
+            self.logger.info(f"Registered {len(results)} {root} contracts under root")
+            return results
+
+        except Exception as e:
+            self.logger.error(f"Error registering futures term structure for {root}: {e}")
+            return None
+
+    # ---------------------------------------------------------
     # Context Manager
     # ---------------------------------------------------------
     def __enter__(self):

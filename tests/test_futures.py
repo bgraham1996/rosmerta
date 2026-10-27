@@ -12,7 +12,7 @@ real cursor; here we monkeypatch the module-level ``_execute_values`` seam so it
 writes into the FakeDB (which models ON CONFLICT last-wins) instead.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -200,3 +200,78 @@ def test_normalise_future_symbol_rejects_bad_input():
         futures.normalise_future_symbol("ES", "2026")       # too short
     with pytest.raises(ValueError):
         futures.normalise_future_symbol("ES", "20261318")   # month 13
+
+
+# --------------------------------------------------------------------------
+# IB contract -> registration mapping (Phase B, pure / IB-free)
+# --------------------------------------------------------------------------
+class _FakeContract:
+    """Minimal stand-in for an ib_insync Contract (attribute access)."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def _es_contract(expiry, con_id, local):
+    return dict(symbol="ES", lastTradeDateOrContractMonth=expiry, multiplier="50",
+                conId=con_id, exchange="CME", currency="USD", localSymbol=local)
+
+
+def test_normalise_ib_future_from_dict():
+    out = futures.normalise_ib_future(_es_contract("20261218", 515416632, "ESZ6"))
+    assert out == {
+        "root": "ES", "symbol": "ESZ26", "expiry": date(2026, 12, 18),
+        "multiplier": 50.0, "ib_con_id": 515416632,
+        "exchange": "CME", "currency": "USD",
+    }
+
+
+def test_normalise_ib_future_from_object():
+    c = _FakeContract(symbol="ES", lastTradeDateOrContractMonth="20270319",
+                      multiplier="50", conId=649180684, exchange="CME", currency="USD")
+    out = futures.normalise_ib_future(c)
+    assert out["symbol"] == "ESH27" and out["expiry"] == date(2027, 3, 19)
+    assert out["multiplier"] == 50.0 and out["ib_con_id"] == 649180684
+
+
+def test_normalise_ib_future_missing_fields_raises():
+    with pytest.raises(ValueError):
+        futures.normalise_ib_future({"symbol": "ES"})       # no expiry
+
+
+def test_register_term_structure_registers_root_and_contracts_in_expiry_order(fdb):
+    db, conn = fdb
+    contracts = [
+        futures.normalise_ib_future(_es_contract("20271217", 586139767, "ESZ7")),
+        futures.normalise_ib_future(_es_contract("20261218", 515416632, "ESZ6")),
+        futures.normalise_ib_future(_es_contract("20270319", 649180684, "ESH7")),
+    ]
+    results = futures.register_term_structure(conn, "ES", contracts)
+    # Ordered by expiry ascending.
+    assert [sym for sym, _ in results] == ["ESZ26", "ESH27", "ESZ27"]
+    # Root exists once, each contract links to it.
+    root_id = futures.resolve_stock_id(conn, "ES")
+    assert db.stock_rows[root_id]["sec_type"] == "FUTROOT"
+    for _, cid in results:
+        assert db.stock_rows[cid]["parent_stock_id"] == root_id
+        assert db.stock_rows[cid]["sec_type"] == "FUT"
+    # Navigation returns them expiry-ordered with conId carried through.
+    children = futures.get_child_contracts(conn, "ES")
+    assert [c[1] for c in children] == ["ESZ26", "ESH27", "ESZ27"]
+    assert children[0][4] == 515416632   # ib_con_id
+
+
+def test_register_term_structure_is_idempotent(fdb):
+    db, conn = fdb
+    contracts = [futures.normalise_ib_future(_es_contract("20261218", 515416632, "ESZ6"))]
+    first = futures.register_term_structure(conn, "ES", contracts)
+    second = futures.register_term_structure(conn, "ES", contracts)
+    assert first == second
+    # Exactly one root + one contract row.
+    assert sum(1 for r in db.stock_rows.values() if r["symbol"] == "ES") == 1
+    assert sum(1 for r in db.stock_rows.values() if r["symbol"] == "ESZ26") == 1
+
+
+def test_register_term_structure_empty_is_noop(fdb):
+    db, conn = fdb
+    assert futures.register_term_structure(conn, "ES", []) == []
+    assert not any(r["symbol"] == "ES" for r in db.stock_rows.values())

@@ -22,7 +22,15 @@ its ``conId`` maps into ``ib_con_id`` at ingestion (that mapping is the
 deferred IB-retrieval slice). Every write here is idempotent via
 ``ON CONFLICT (symbol)`` so re-registering a contract updates its metadata
 rather than duplicating it.
+
+Phase B adds **term-structure registration**: a pure, IB-free mapping from an IB
+futures contract to the canonical registration fields (``normalise_ib_future``),
+and a batch register of a root + all its live contracts (``register_term_structure``).
+The IB enumeration itself (``reqContractDetails``) lives in ``price_retrival.ib_api``;
+everything here stays vendor-agnostic and unit-testable without a gateway.
 """
+
+from datetime import datetime
 
 
 # CME / IB futures month codes (Jan..Dec). Vendor-neutral: these are the
@@ -56,6 +64,52 @@ def normalise_future_symbol(root, last_trade_date):
     if month not in _MONTH_CODES:
         raise ValueError(f"invalid contract month {month} in {last_trade_date!r}")
     return f"{root}{_MONTH_CODES[month]}{year % 100:02d}"
+
+
+def _expiry_to_date(last_trade_date):
+    """IB ``lastTradeDateOrContractMonth`` → a ``date``.
+
+    ``'YYYYMMDD'`` → that date; a ``date``/``datetime`` passes through; a bare
+    ``'YYYYMM'`` (no day) → ``None`` (we don't invent a day).
+    """
+    if hasattr(last_trade_date, 'year'):
+        return last_trade_date.date() if isinstance(last_trade_date, datetime) else last_trade_date
+    s = str(last_trade_date).strip()
+    if len(s) >= 8 and s[:8].isdigit():
+        return datetime.strptime(s[:8], '%Y%m%d').date()
+    return None
+
+
+def normalise_ib_future(contract):
+    """Map an IB futures contract to the canonical registration fields.
+
+    Pure and IB-free: ``contract`` may be an ``ib_insync`` ``Contract`` (any object
+    exposing the attributes) **or** a plain ``dict`` with the same keys — so it is
+    unit-testable from captured contract fixtures without a gateway. Reads
+    ``symbol`` (the root), ``lastTradeDateOrContractMonth``, ``multiplier``,
+    ``conId``, ``exchange``, ``currency`` and returns::
+
+        {root, symbol, expiry, multiplier, ib_con_id, exchange, currency}
+
+    where ``symbol`` is the **constructed** normalised symbol (``ESZ26``) and the
+    IB ``conId`` lands in ``ib_con_id`` — never in the symbol (see
+    ``normalise_future_symbol`` for why ``localSymbol`` is unsafe as a key).
+    """
+    get = contract.get if isinstance(contract, dict) else (lambda k: getattr(contract, k, None))
+    root = get('symbol')
+    last_trade = get('lastTradeDateOrContractMonth')
+    if not root or not last_trade:
+        raise ValueError(f"IB future missing symbol/lastTradeDateOrContractMonth: {contract!r}")
+    multiplier = get('multiplier')
+    return {
+        'root': root,
+        'symbol': normalise_future_symbol(root, last_trade),
+        'expiry': _expiry_to_date(last_trade),
+        'multiplier': float(multiplier) if multiplier not in (None, '') else None,
+        'ib_con_id': get('conId') or None,
+        'exchange': get('exchange'),
+        'currency': get('currency') or 'USD',
+    }
 
 
 def resolve_stock_id(conn, symbol):
@@ -118,6 +172,38 @@ def register_contract(conn, root_symbol, symbol, expiry, multiplier,
         contract_id = cur.fetchone()[0]
     conn.commit()
     return contract_id
+
+
+def register_term_structure(conn, root_symbol, contracts, name=None):
+    """Register a root + a batch of its contracts in one pass (Phase B).
+
+    ``contracts`` is an iterable of normalised dicts as produced by
+    ``normalise_ib_future`` (keys: ``symbol, expiry, multiplier, ib_con_id,
+    exchange, currency``). The root is created/ensured first (taking exchange /
+    currency from the first contract when available), then every contract is
+    registered idempotently via ``register_contract``. Rows are processed in
+    expiry order (undated last) for deterministic writes. Returns a list of
+    ``(symbol, stock_id)`` in that order; an empty ``contracts`` is a no-op.
+    """
+    contracts = list(contracts)
+    if not contracts:
+        return []
+    first = contracts[0]
+    root_id = get_or_create_root(
+        conn, root_symbol, name=name,
+        exchange=first.get('exchange') or 'CME',
+        currency=first.get('currency') or 'USD',
+    )
+    ordered = sorted(contracts, key=lambda c: (c.get('expiry') is None, c.get('expiry')))
+    results = []
+    for c in ordered:
+        cid = register_contract(
+            conn, root_symbol, c['symbol'], c.get('expiry'), c.get('multiplier'),
+            exchange=c.get('exchange') or 'CME', currency=c.get('currency') or 'USD',
+            ib_con_id=c.get('ib_con_id'),
+        )
+        results.append((c['symbol'], cid))
+    return results
 
 
 def get_child_contracts(conn, root_symbol, active_only=True):
