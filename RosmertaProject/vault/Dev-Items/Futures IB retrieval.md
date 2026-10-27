@@ -49,10 +49,10 @@ Probed with `ib-insync` 0.9.86 using a dedicated `clientId` (read-only: `reqCont
 **Phase C — selection / roll (coordinate with deferred items):** *(front-month built + live-verified 2026-10-27)*
 - [x] **Front-month selection.** `futures.get_front_contract(conn, root, as_of=None)` — nearest `expiry >= as_of` (default today UTC) from the registered chain; expired-only chain → `None`. Pure/DB, unit-tested (nearest pick, roll past expired, on-expiry inclusive, string `as_of`, all-expired/unknown-root → None).
 - [x] **"Fetch the active contract" one-call path.** `IBStockDataFetcher.get_front_month_hourly_bars(root, exchange, ...)`: registers the term structure (Phase B), selects the front contract, then fetches its bars (Phase A). Live-verified: picked `ESZ26` (expiry 2026-12-18) as front and fetched 92 UTC bars into it; other contracts registered with 0 bars as intended.
-- [ ] Continuous series via `ContFuture` and/or our own roll logic — **deferred**, needs overlapping-contract aggregation first (owned by [[Futures asset data retrival and storage]] / [[Futures in Asset and Market]]).
+- [ ] Continuous series via `ContFuture` and/or our own roll logic — **deferred**, needs overlapping-contract aggregation first. Design now written up in [[Futures contract aggregation and continuous series]].
 
-**Phase D — CLI / bulk wiring (optional, after A–B):**
-- [ ] Expose through `main.py` (lazy-import + Rich, matching `fetch`/`bulk`), e.g. `fetch future <ROOT> [--expiry ...]` and a term-structure registration command. Decide whether futures roots join the watchlist/bulk model or stay a separate command.
+**Phase D — CLI wiring:** *(built + live-verified 2026-10-27)*
+- [x] Exposed through `main.py` as a `futures` command group (lazy-import + Rich, matching `fetch`/`bulk`): `futures register <ROOT> [--exchange CME] [--include-expired]` (enumerate + register the chain), `futures list <ROOT>` (DB-only, marks the front month), `futures fetch <ROOT> [--expiry YYYYMMDD] [-s -e] [--no-db]` (front-month by default; `--no-db` requires `--expiry`). Kept futures as a **separate command group** rather than folding into the equity watchlist/bulk model. Live-verified all three against the gateway + DB (register 21 ES contracts → list → fetch front-month ESZ26 92 bars), then cleaned up.
 
 # Decisions made
 - **Timezone storage convention — RESOLVED (2026-10-27): store tz-aware UTC.** Verified against the live DB: `price_hourly.timestamp` is **`TIMESTAMPTZ`** and the DB session is **`Europe/London`**, and `data_models.Asset` queries it with **UTC-aware bounds** (`data_models.py` `.replace(tzinfo=timezone.utc)`) — i.e. the analysis layer compares *true instants*. So futures bars are converted to **tz-aware UTC** (`IBStockDataFetcher._to_utc`) and passed through to the upsert tz-aware. A naive value is a trap here: Postgres reinterprets it in the session tz and shifts the instant (a 22:00Z bar stored naive landed at 21:00Z under BST). Confirmed fix: stored true UTC instant now equals the bar's real time.
@@ -61,7 +61,7 @@ Probed with `ib-insync` 0.9.86 using a dedicated `clientId` (read-only: `reqCont
 - **Registration granularity.** Register the full live term structure (21 rows for ES) vs only contracts we actually fetch. Leaning: register what we fetch (Phase A) and offer full enumeration as an explicit action (Phase B), to avoid 20+ idle root-children per product.
 
 # Open questions / deferred
-- **Front-month roll rule** (expiry-based vs volume/OI-based) — deferred; needs the aggregation logic from [[Futures asset data retrival and storage]].
+- **Front-month roll rule** (expiry-based vs volume/OI-based) — deferred; designed in [[Futures contract aggregation and continuous series]]. (Note: `get_front_contract` already does simple nearest-unexpired selection; a *roll* across contracts for a continuous series is the harder, separate problem.)
 - **Expired-contract backfill** (`includeExpired=True`) for history beyond the current front — not needed for the first cut.
 - **Non-equity-index products** (energy, rates, metals) may have different `multiplier`/session/tz quirks; validate the normalisation helper against a second root (e.g. `CL`) before generalising.
 

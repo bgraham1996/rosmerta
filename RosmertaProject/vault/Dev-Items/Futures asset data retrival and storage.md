@@ -50,8 +50,8 @@ Extend the pipeline beyond equities to **futures**: retrieve and store futures O
 Just **parent → children navigation**: from a root (`ES`), get its current / recent child contracts (via `parent_stock_id`). Front-month selection, roll, and cross-contract aggregation are **not** needed for the first cut.
 
 # Open questions / deferred
-- **Overlapping-contract aggregation:** how to combine/roll across contracts whose data overlaps — the prerequisite for *both* a fetchable root and a continuous series. Deferred.
-- **Continuous series:** model later as another child row (`CONTFUT`) or via our own roll logic, once the aggregation logic exists. Deferred.
+- **Overlapping-contract aggregation:** how to combine/roll across contracts whose data overlaps — the prerequisite for *both* a fetchable root and a continuous series. **Design written up 2026-10-27 in [[Futures contract aggregation and continuous series]]** (roll schedule + ratio adjustment; `CONTFUT` child derived from immutable raw contracts). Still to build.
+- **Continuous series:** model as another child row (`CONTFUT`) derived via the roll/adjustment logic — see [[Futures contract aggregation and continuous series]]. Deferred until that lands.
 
 # Links
 ##### Relevant Docs
