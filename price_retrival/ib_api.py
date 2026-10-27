@@ -338,8 +338,9 @@ class IBStockDataFetcher:
         tz-aware UTC value stores the exact instant regardless of session tz, and
         ``data_models.Asset`` queries this column with UTC-aware bounds, so true
         instants are what the analysis layer compares against. A naive input is
-        assumed already-UTC. (The equity path's bare ``.replace(tzinfo=None)`` has
-        the latent offset bug; reconciling that is the timezone-support item.)
+        assumed already-UTC. (The equity path already stores tz-aware exchange-local
+        timestamps — ``_save_bars_to_db`` passes ``row.date`` with tzinfo intact — so
+        its instants are correct; its ``.replace(tzinfo=None)`` is pagination-only.)
         """
         if getattr(dt, 'tzinfo', None) is None:
             d = dt if isinstance(dt, datetime) else datetime(dt.year, dt.month, dt.day)
