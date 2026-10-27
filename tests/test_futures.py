@@ -275,3 +275,52 @@ def test_register_term_structure_empty_is_noop(fdb):
     db, conn = fdb
     assert futures.register_term_structure(conn, "ES", []) == []
     assert not any(r["symbol"] == "ES" for r in db.stock_rows.values())
+
+
+# --------------------------------------------------------------------------
+# Front-month selection (Phase C — futures.get_front_contract)
+# --------------------------------------------------------------------------
+def _seed_es_chain(conn):
+    """Register ES with three quarterly contracts (Mar/Jun/Sep 2027)."""
+    contracts = [
+        futures.normalise_ib_future(_es_contract("20270319", 649180684, "ESH7")),
+        futures.normalise_ib_future(_es_contract("20270617", 649180661, "ESM7")),
+        futures.normalise_ib_future(_es_contract("20270917", 649180681, "ESU7")),
+    ]
+    futures.register_term_structure(conn, "ES", contracts)
+
+
+def test_get_front_contract_picks_nearest_unexpired(fdb):
+    db, conn = fdb
+    _seed_es_chain(conn)
+    # Before the first expiry → front is the Mar contract.
+    front = futures.get_front_contract(conn, "ES", as_of=date(2027, 1, 1))
+    assert front[1] == "ESH27"
+    assert front[4] == 649180684   # ib_con_id carried through
+
+
+def test_get_front_contract_rolls_past_expired(fdb):
+    db, conn = fdb
+    _seed_es_chain(conn)
+    # After Mar expiry but before Jun → front is the Jun contract.
+    front = futures.get_front_contract(conn, "ES", as_of=date(2027, 4, 1))
+    assert front[1] == "ESM27"
+    # On the expiry date itself, the contract is still considered front (>=).
+    assert futures.get_front_contract(conn, "ES", as_of=date(2027, 3, 19))[1] == "ESH27"
+
+
+def test_get_front_contract_accepts_string_as_of(fdb):
+    db, conn = fdb
+    _seed_es_chain(conn)
+    assert futures.get_front_contract(conn, "ES", as_of="2027-07-01")[1] == "ESU27"
+
+
+def test_get_front_contract_all_expired_returns_none(fdb):
+    db, conn = fdb
+    _seed_es_chain(conn)
+    assert futures.get_front_contract(conn, "ES", as_of=date(2028, 1, 1)) is None
+
+
+def test_get_front_contract_unknown_root_returns_none(fdb):
+    db, conn = fdb
+    assert futures.get_front_contract(conn, "NOPE", as_of=date(2027, 1, 1)) is None

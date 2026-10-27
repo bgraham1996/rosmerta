@@ -30,7 +30,18 @@ The IB enumeration itself (``reqContractDetails``) lives in ``price_retrival.ib_
 everything here stays vendor-agnostic and unit-testable without a gateway.
 """
 
-from datetime import datetime
+from datetime import date, datetime
+
+
+def _as_date(value):
+    """Coerce a stored expiry (``date`` / ``datetime`` / ``'YYYY-MM-DD'``) to a ``date``."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return datetime.strptime(str(value)[:10], '%Y-%m-%d').date()
 
 
 # CME / IB futures month codes (Jan..Dec). Vendor-neutral: these are the
@@ -209,9 +220,10 @@ def register_term_structure(conn, root_symbol, contracts, name=None):
 def get_child_contracts(conn, root_symbol, active_only=True):
     """List a root's contracts (root -> children navigation), ordered by expiry.
 
-    Returns rows as ``(stock_id, symbol, expiry, multiplier, ib_con_id)``. This
-    is the only model function needed now; front-month selection and roll are
-    deferred. Returns ``[]`` if the root is unknown or has no contracts.
+    Returns rows as ``(stock_id, symbol, expiry, multiplier, ib_con_id)``,
+    expiry-ordered. ``get_front_contract`` builds on this for front-month
+    selection; roll / cross-contract aggregation remain deferred. Returns ``[]``
+    if the root is unknown or has no contracts.
     """
     root_id = resolve_stock_id(conn, root_symbol)
     if root_id is None:
@@ -224,3 +236,22 @@ def get_child_contracts(conn, root_symbol, active_only=True):
     with conn.cursor() as cur:
         cur.execute(sql, (root_id,))
         return cur.fetchall()
+
+
+def get_front_contract(conn, root_symbol, as_of=None, active_only=True):
+    """Return a root's **front-month** contract: the child with the nearest
+    expiry on/after ``as_of`` (Phase C — front-month selection only).
+
+    ``as_of`` defaults to today's UTC date; a ``date`` / ``datetime`` / ``'YYYY-MM-DD'``
+    is accepted. Returns the row ``(stock_id, symbol, expiry, multiplier,
+    ib_con_id)``, or ``None`` if the root is unknown or every contract has already
+    expired (caller should enumerate/register a fresher chain). Contracts with a
+    missing expiry are skipped. Roll convention and continuous series are
+    deliberately out of scope — this just picks the active contract to fetch.
+    """
+    as_of = _as_date(as_of) if as_of is not None else datetime.utcnow().date()
+    for row in get_child_contracts(conn, root_symbol, active_only=active_only):
+        expiry = _as_date(row[2])
+        if expiry is not None and expiry >= as_of:
+            return row          # children are expiry-ascending → first match is nearest
+    return None

@@ -528,6 +528,55 @@ class IBStockDataFetcher:
             return None
 
     # ---------------------------------------------------------
+    # Futures — Phase C: front-month selection ("fetch the active contract")
+    # ---------------------------------------------------------
+    def get_front_month_hourly_bars(self, root, exchange, currency='USD',
+                                    start_date=None, end_date=None, as_of=None,
+                                    register=True, save_to_db=True):
+        """Fetch hourly bars for a root's **front-month** contract in one call.
+
+        Ensures the term structure is registered (Phase B enumeration, unless
+        ``register=False`` and the chain is already in the DB), selects the front
+        contract (nearest unexpired expiry — ``futures.get_front_contract``), then
+        delegates to ``get_futures_hourly_bars`` for that contract. ``as_of`` picks
+        the reference date for "unexpired" (default: today UTC).
+
+        Returns ``(front_symbol, df)``, or ``None`` if no active contract is found
+        (e.g. the chain is empty or fully expired — enumerate a fresher one).
+        Roll across contracts / continuous series are deferred.
+        """
+        try:
+            if not self.db_config:
+                self.logger.error("get_front_month_hourly_bars requires a DB (contract registry)")
+                return None
+            if not self.db_conn or self.db_conn.closed:
+                self.connect_db()
+
+            if register:
+                if self.register_futures_term_structure(root, exchange, currency=currency) is None:
+                    return None
+
+            front = futures_registry.get_front_contract(self.db_conn, root, as_of=as_of)
+            if not front:
+                self.logger.warning(
+                    f"No unexpired {root} contract found "
+                    f"(as_of={as_of or 'today'}); nothing to fetch"
+                )
+                return None
+
+            front_symbol, expiry = front[1], futures_registry._as_date(front[2])
+            self.logger.info(f"Front-month {root} = {front_symbol} (expiry {expiry})")
+            df = self.get_futures_hourly_bars(
+                root, expiry.strftime('%Y%m%d'), exchange, currency=currency,
+                start_date=start_date, end_date=end_date, save_to_db=save_to_db,
+            )
+            return (front_symbol, df)
+
+        except Exception as e:
+            self.logger.error(f"Error fetching front-month bars for {root}: {e}")
+            return None
+
+    # ---------------------------------------------------------
     # Context Manager
     # ---------------------------------------------------------
     def __enter__(self):

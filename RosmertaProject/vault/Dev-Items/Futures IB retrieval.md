@@ -46,8 +46,9 @@ Probed with `ib-insync` 0.9.86 using a dedicated `clientId` (read-only: `reqCont
 - [x] Pure, IB-free mapping helper `futures.normalise_ib_future(contract)` (accepts an ib-insync `Contract` **or** a dict) → `{root, symbol, expiry, multiplier, ib_con_id, exchange, currency}`, plus `futures.register_term_structure(conn, root, contracts)` (batch, expiry-ordered, idempotent). Unit-tested against captured contract fixtures + FakeDB (6 tests).
 - [x] **Live verify (2026-10-27):** enumerated + registered the full **ES term structure — 21 contracts** (ESZ26…ESZ31) in expiry order, each with correct normalised symbol / expiry / multiplier / `conId` / `parent_stock_id=ES`; then cleaned up (table back to 102 STK).
 
-**Phase C — selection / roll (coordinate with deferred items):**
-- [ ] Front-month selection (nearest unexpired `expiry`) for "fetch the active contract".
+**Phase C — selection / roll (coordinate with deferred items):** *(front-month built + live-verified 2026-10-27)*
+- [x] **Front-month selection.** `futures.get_front_contract(conn, root, as_of=None)` — nearest `expiry >= as_of` (default today UTC) from the registered chain; expired-only chain → `None`. Pure/DB, unit-tested (nearest pick, roll past expired, on-expiry inclusive, string `as_of`, all-expired/unknown-root → None).
+- [x] **"Fetch the active contract" one-call path.** `IBStockDataFetcher.get_front_month_hourly_bars(root, exchange, ...)`: registers the term structure (Phase B), selects the front contract, then fetches its bars (Phase A). Live-verified: picked `ESZ26` (expiry 2026-12-18) as front and fetched 92 UTC bars into it; other contracts registered with 0 bars as intended.
 - [ ] Continuous series via `ContFuture` and/or our own roll logic — **deferred**, needs overlapping-contract aggregation first (owned by [[Futures asset data retrival and storage]] / [[Futures in Asset and Market]]).
 
 **Phase D — CLI / bulk wiring (optional, after A–B):**
