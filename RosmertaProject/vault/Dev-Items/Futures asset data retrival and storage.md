@@ -32,8 +32,10 @@ Extend the pipeline beyond equities to **futures**: retrieve and store futures O
 - [[Futures schema - contracts as stocks]] — the migration(s).
 - [[Futures OHLCV storage and retrieval]] — store/serve candles per contract + per root.
 
-**Deferred (explicitly out of the near-term slice):**
-- [[Futures IB retrieval]] — IB `Future` / `ContFuture` fetch, `useRTH=False`, roll / front-month, 30-day chunking. *Not now.*
+**Cycle-2 (now in progress):**
+- [[Futures IB retrieval]] — **In Progress (2026-10-27).** IB `Future` / `ContFuture` fetch, `useRTH=False`, roll / front-month, 30-day chunking. Live read-only gateway probe done: `reqContractDetails` enumerates the term structure (21 live ES contracts), `conId`→`ib_con_id`, normalised symbol must be constructed from `lastTradeDateOrContractMonth` (not IB's ambiguous `localSymbol`), and futures bars return tz-aware Central time (UTC-normalisation decision pending). Findings + phased plan live in that item.
+
+**Still deferred:**
 - [[Futures in Asset and Market]] — how the analysis classes consume futures (shared path vs parallel). *Not now.*
 
 # Design principle
@@ -48,8 +50,9 @@ Extend the pipeline beyond equities to **futures**: retrieve and store futures O
 Just **parent → children navigation**: from a root (`ES`), get its current / recent child contracts (via `parent_stock_id`). Front-month selection, roll, and cross-contract aggregation are **not** needed for the first cut.
 
 # Open questions / deferred
-- **Overlapping-contract aggregation:** how to combine/roll across contracts whose data overlaps — the prerequisite for *both* a fetchable root and a continuous series. Deferred.
-- **Continuous series:** model later as another child row (`CONTFUT`) or via our own roll logic, once the aggregation logic exists. Deferred.
+- **Overlapping-contract aggregation:** ~~prerequisite for a continuous series~~ — **built 2026-10-27** (volume roll + ratio back-adjustment), see [[Futures contract aggregation and continuous series]]. Live-verified across the real Sep-2026 ES roll.
+- **Continuous series:** **built** as a `CONTFUT` child (`ES.c1`) derived from immutable raw contracts — see [[Futures contract aggregation and continuous series]]. Remaining: persist the roll schedule, OI-based roll, second-month series, and `Asset`/`Market` consumption ([[Futures in Asset and Market]]).
+- **Fetchable root:** now unblocked (the aggregation logic exists) — a root can expose its `CONTFUT` series. Wiring deferred to [[Futures in Asset and Market]].
 
 # Links
 ##### Relevant Docs

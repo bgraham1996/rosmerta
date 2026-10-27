@@ -12,7 +12,7 @@ real cursor; here we monkeypatch the module-level ``_execute_values`` seam so it
 writes into the FakeDB (which models ON CONFLICT last-wins) instead.
 """
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
 
@@ -172,3 +172,155 @@ def test_upsert_empty_is_noop(priced):
     db, conn = priced
     assert ohlcv_store.upsert_hourly_bars(conn, 42, []) == 0
     assert 42 not in db.prices
+
+
+# --------------------------------------------------------------------------
+# Symbol normalisation (price_retrival.futures.normalise_future_symbol)
+# Pure, IB-free: the IB -> canonical-symbol mapping used by the fetcher.
+# --------------------------------------------------------------------------
+def test_normalise_future_symbol_from_yyyymmdd():
+    # IB's localSymbol would be the ambiguous 'ESZ6'; we build 'ESZ26'.
+    assert futures.normalise_future_symbol("ES", "20261218") == "ESZ26"
+
+
+def test_normalise_future_symbol_quarterly_month_codes():
+    # ES quarterly cycle H/M/U/Z = Mar/Jun/Sep/Dec.
+    assert futures.normalise_future_symbol("ES", "20270319") == "ESH27"
+    assert futures.normalise_future_symbol("ES", "20270617") == "ESM27"
+    assert futures.normalise_future_symbol("ES", "20270917") == "ESU27"
+
+
+def test_normalise_future_symbol_accepts_yyyymm_and_date():
+    assert futures.normalise_future_symbol("CL", "202601") == "CLF26"
+    assert futures.normalise_future_symbol("ES", datetime(2026, 12, 18)) == "ESZ26"
+
+
+def test_normalise_future_symbol_rejects_bad_input():
+    with pytest.raises(ValueError):
+        futures.normalise_future_symbol("ES", "2026")       # too short
+    with pytest.raises(ValueError):
+        futures.normalise_future_symbol("ES", "20261318")   # month 13
+
+
+# --------------------------------------------------------------------------
+# IB contract -> registration mapping (Phase B, pure / IB-free)
+# --------------------------------------------------------------------------
+class _FakeContract:
+    """Minimal stand-in for an ib_insync Contract (attribute access)."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+def _es_contract(expiry, con_id, local):
+    return dict(symbol="ES", lastTradeDateOrContractMonth=expiry, multiplier="50",
+                conId=con_id, exchange="CME", currency="USD", localSymbol=local)
+
+
+def test_normalise_ib_future_from_dict():
+    out = futures.normalise_ib_future(_es_contract("20261218", 515416632, "ESZ6"))
+    assert out == {
+        "root": "ES", "symbol": "ESZ26", "expiry": date(2026, 12, 18),
+        "multiplier": 50.0, "ib_con_id": 515416632,
+        "exchange": "CME", "currency": "USD",
+    }
+
+
+def test_normalise_ib_future_from_object():
+    c = _FakeContract(symbol="ES", lastTradeDateOrContractMonth="20270319",
+                      multiplier="50", conId=649180684, exchange="CME", currency="USD")
+    out = futures.normalise_ib_future(c)
+    assert out["symbol"] == "ESH27" and out["expiry"] == date(2027, 3, 19)
+    assert out["multiplier"] == 50.0 and out["ib_con_id"] == 649180684
+
+
+def test_normalise_ib_future_missing_fields_raises():
+    with pytest.raises(ValueError):
+        futures.normalise_ib_future({"symbol": "ES"})       # no expiry
+
+
+def test_register_term_structure_registers_root_and_contracts_in_expiry_order(fdb):
+    db, conn = fdb
+    contracts = [
+        futures.normalise_ib_future(_es_contract("20271217", 586139767, "ESZ7")),
+        futures.normalise_ib_future(_es_contract("20261218", 515416632, "ESZ6")),
+        futures.normalise_ib_future(_es_contract("20270319", 649180684, "ESH7")),
+    ]
+    results = futures.register_term_structure(conn, "ES", contracts)
+    # Ordered by expiry ascending.
+    assert [sym for sym, _ in results] == ["ESZ26", "ESH27", "ESZ27"]
+    # Root exists once, each contract links to it.
+    root_id = futures.resolve_stock_id(conn, "ES")
+    assert db.stock_rows[root_id]["sec_type"] == "FUTROOT"
+    for _, cid in results:
+        assert db.stock_rows[cid]["parent_stock_id"] == root_id
+        assert db.stock_rows[cid]["sec_type"] == "FUT"
+    # Navigation returns them expiry-ordered with conId carried through.
+    children = futures.get_child_contracts(conn, "ES")
+    assert [c[1] for c in children] == ["ESZ26", "ESH27", "ESZ27"]
+    assert children[0][4] == 515416632   # ib_con_id
+
+
+def test_register_term_structure_is_idempotent(fdb):
+    db, conn = fdb
+    contracts = [futures.normalise_ib_future(_es_contract("20261218", 515416632, "ESZ6"))]
+    first = futures.register_term_structure(conn, "ES", contracts)
+    second = futures.register_term_structure(conn, "ES", contracts)
+    assert first == second
+    # Exactly one root + one contract row.
+    assert sum(1 for r in db.stock_rows.values() if r["symbol"] == "ES") == 1
+    assert sum(1 for r in db.stock_rows.values() if r["symbol"] == "ESZ26") == 1
+
+
+def test_register_term_structure_empty_is_noop(fdb):
+    db, conn = fdb
+    assert futures.register_term_structure(conn, "ES", []) == []
+    assert not any(r["symbol"] == "ES" for r in db.stock_rows.values())
+
+
+# --------------------------------------------------------------------------
+# Front-month selection (Phase C — futures.get_front_contract)
+# --------------------------------------------------------------------------
+def _seed_es_chain(conn):
+    """Register ES with three quarterly contracts (Mar/Jun/Sep 2027)."""
+    contracts = [
+        futures.normalise_ib_future(_es_contract("20270319", 649180684, "ESH7")),
+        futures.normalise_ib_future(_es_contract("20270617", 649180661, "ESM7")),
+        futures.normalise_ib_future(_es_contract("20270917", 649180681, "ESU7")),
+    ]
+    futures.register_term_structure(conn, "ES", contracts)
+
+
+def test_get_front_contract_picks_nearest_unexpired(fdb):
+    db, conn = fdb
+    _seed_es_chain(conn)
+    # Before the first expiry → front is the Mar contract.
+    front = futures.get_front_contract(conn, "ES", as_of=date(2027, 1, 1))
+    assert front[1] == "ESH27"
+    assert front[4] == 649180684   # ib_con_id carried through
+
+
+def test_get_front_contract_rolls_past_expired(fdb):
+    db, conn = fdb
+    _seed_es_chain(conn)
+    # After Mar expiry but before Jun → front is the Jun contract.
+    front = futures.get_front_contract(conn, "ES", as_of=date(2027, 4, 1))
+    assert front[1] == "ESM27"
+    # On the expiry date itself, the contract is still considered front (>=).
+    assert futures.get_front_contract(conn, "ES", as_of=date(2027, 3, 19))[1] == "ESH27"
+
+
+def test_get_front_contract_accepts_string_as_of(fdb):
+    db, conn = fdb
+    _seed_es_chain(conn)
+    assert futures.get_front_contract(conn, "ES", as_of="2027-07-01")[1] == "ESU27"
+
+
+def test_get_front_contract_all_expired_returns_none(fdb):
+    db, conn = fdb
+    _seed_es_chain(conn)
+    assert futures.get_front_contract(conn, "ES", as_of=date(2028, 1, 1)) is None
+
+
+def test_get_front_contract_unknown_root_returns_none(fdb):
+    db, conn = fdb
+    assert futures.get_front_contract(conn, "NOPE", as_of=date(2027, 1, 1)) is None

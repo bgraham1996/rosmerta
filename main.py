@@ -494,6 +494,216 @@ def bulk_dividends(list_name, start, end, exchange, no_fallback, delay, dry_run)
  
 
 
+# ─── Futures command group ──────────────────────────────────
+@cli.group()
+def futures():
+    """Futures contracts: register term structures and fetch OHLCV.
+
+    Contracts-as-stocks model: a root (ES) and each contract (ESZ26) are rows
+    in `stocks`; a contract's candles are ordinary price_hourly rows. Register
+    a root's live chain once, then fetch bars per contract (front-month by
+    default). Roll / continuous-series are not wired yet (see the board).
+    """
+    pass
+
+
+def _render_futures_contracts(root, title=None):
+    """Print a root's registered contracts, marking the front month. DB-only."""
+    import psycopg2
+    from price_retrival import futures as fut
+
+    conn = psycopg2.connect(**get_db_config())
+    try:
+        rows = fut.get_child_contracts(conn, root)
+        front = fut.get_front_contract(conn, root)
+    finally:
+        conn.close()
+
+    if not rows:
+        console.print(f"[yellow]No registered contracts for {root}.[/yellow]")
+        return
+
+    front_sid = front[0] if front else None
+    table = Table(title=title or f"{root} — Contracts ({len(rows)})")
+    table.add_column("Symbol", style="cyan")
+    table.add_column("Expiry", style="dim")
+    table.add_column("Mult", justify="right", style="dim")
+    table.add_column("conId", justify="right", style="dim")
+    table.add_column("", style="green bold")
+    for sid, sym, expiry, mult, conid in rows:
+        table.add_row(
+            sym,
+            str(expiry) if expiry else "—",
+            f"{float(mult):g}" if mult is not None else "—",
+            str(conid) if conid else "—",
+            "◄ front" if sid == front_sid else "",
+        )
+    console.print(table)
+
+
+@futures.command('register')
+@click.argument('root')
+@click.option('--exchange', default='CME', help='Real futures exchange (default: CME)')
+@click.option('--currency', default='USD', help='Contract currency (default: USD)')
+@click.option('--include-expired', is_flag=True,
+              help='Also enumerate expired contracts (default: live only)')
+def futures_register(root, exchange, currency, include_expired):
+    """Enumerate and register a futures root's live term structure from IB.
+
+    Pulls the contract chain via reqContractDetails and registers the root plus
+    every contract (idempotent). No price bars are fetched — use `futures fetch`.
+
+    Example: rosmerta futures register ES --exchange CME
+    """
+    from price_retrival.ib_api import IBStockDataFetcher
+
+    root = root.upper()
+    console.print(f"[cyan]Registering {root} term structure[/cyan] on {exchange}…")
+
+    with IBStockDataFetcher(host='127.0.0.1', port=4001,
+                            db_config=get_db_config()) as fetcher:
+        results = fetcher.register_futures_term_structure(
+            root, exchange, currency=currency, include_expired=include_expired
+        )
+
+    if results is None:
+        console.print(f"[red]Could not register {root} (IB/DB error).[/red]")
+        return
+    if not results:
+        console.print(f"[yellow]No contracts found for {root} on {exchange}.[/yellow]")
+        return
+
+    _render_futures_contracts(root, title=f"{root} — Registered ({len(results)} contracts)")
+    console.print("[green]✓ Term structure registered[/green]")
+
+
+@futures.command('list')
+@click.argument('root')
+def futures_list(root):
+    """List a root's registered contracts (marking the front month). No IB call.
+
+    Example: rosmerta futures list ES
+    """
+    _render_futures_contracts(root.upper())
+
+
+@futures.command('fetch')
+@click.argument('root')
+@click.option('--expiry', default=None,
+              help='Contract expiry YYYYMMDD. Omit to fetch the front month.')
+@click.option('--exchange', default='CME', help='Real futures exchange (default: CME)')
+@click.option('--currency', default='USD', help='Contract currency (default: USD)')
+@click.option('--start', '-s', default=None,
+              help='Start date (YYYY-MM-DD, UTC). Default: ~30 days back.')
+@click.option('--end', '-e', default=None,
+              help='End date (YYYY-MM-DD, UTC). Default: now.')
+@click.option('--no-db', is_flag=True, help='Skip database storage')
+def futures_fetch(root, expiry, exchange, currency, start, end, no_db):
+    """Fetch hourly bars for a futures contract (front-month by default).
+
+    With no --expiry, registers the term structure and fetches the active
+    (front-month) contract. Front-month selection needs the DB, so --no-db
+    requires an explicit --expiry.
+
+    Example: rosmerta futures fetch ES                   # front month
+    Example: rosmerta futures fetch ES --expiry 20261218
+    """
+    from price_retrival.ib_api import IBStockDataFetcher
+
+    root = root.upper()
+    if no_db and not expiry:
+        console.print("[red]--no-db requires --expiry (front-month selection needs the DB).[/red]")
+        return
+
+    db_config = get_db_config(no_db)
+    with IBStockDataFetcher(host='127.0.0.1', port=4001, db_config=db_config) as fetcher:
+        if expiry:
+            label = f"{root} {expiry}"
+            console.print(f"[cyan]Fetching {label}[/cyan] on {exchange} ({start or '~30d'} → {end or 'now'})")
+            df = fetcher.get_futures_hourly_bars(
+                root, expiry, exchange, currency=currency,
+                start_date=start, end_date=end, save_to_db=not no_db,
+            )
+        else:
+            console.print(f"[cyan]Fetching {root} front-month[/cyan] on {exchange} ({start or '~30d'} → {end or 'now'})")
+            out = fetcher.get_front_month_hourly_bars(
+                root, exchange, currency=currency,
+                start_date=start, end_date=end, save_to_db=not no_db,
+            )
+            if out is None:
+                console.print(f"[red]No active {root} contract found (register the chain first?).[/red]")
+                return
+            label, df = out
+
+    if df is None or df.empty:
+        console.print(f"[red]No data retrieved for {label}[/red]")
+        return
+
+    table = Table(title=f"{label} — Hourly Bars")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("Bars fetched", str(len(df)))
+    table.add_row("Date range (UTC)", f"{df['date'].min()} → {df['date'].max()}")
+    table.add_row("Open (first)", f"{df.iloc[0]['open']:.2f}")
+    table.add_row("Close (last)", f"{df.iloc[-1]['close']:.2f}")
+    table.add_row("High (max)", f"{df['high'].max():.2f}")
+    table.add_row("Low (min)", f"{df['low'].min():.2f}")
+    table.add_row("Total volume", f"{df['volume'].sum():,.0f}")
+    console.print(table)
+
+    if not no_db:
+        console.print("[green]✓ Saved to database[/green]")
+    else:
+        console.print("[yellow]Database storage skipped (--no-db)[/yellow]")
+
+
+@futures.command('continuous')
+@click.argument('root')
+@click.option('--symbol', default=None,
+              help='Continuous series symbol (default: <ROOT>.c1)')
+def futures_continuous(root, symbol):
+    """Build + store a root's continuous series from its registered contracts.
+
+    Splices the root's contracts (already fetched into the DB) into one gap-free
+    series using a volume roll + ratio back-adjustment, stored as a CONTFUT child
+    (e.g. ES.c1). Fetch the contracts first with `futures fetch`. No IB call.
+
+    Example: rosmerta futures continuous ES
+    """
+    import psycopg2
+    from price_retrival.continuous import build_and_store_continuous
+
+    root = root.upper()
+    console.print(f"[cyan]Building continuous series for {root}[/cyan] (volume roll + ratio adjust)…")
+
+    conn = psycopg2.connect(**get_db_config())
+    try:
+        result = build_and_store_continuous(conn, root, series_symbol=symbol)
+    finally:
+        conn.close()
+
+    if result is None:
+        console.print(f"[yellow]Nothing to build for {root} — no contracts with candles. "
+                      f"Fetch some first (e.g. `futures fetch {root}`).[/yellow]")
+        return
+
+    console.print(
+        f"[green]✓ {result['symbol']}[/green] — {result['bars']:,} bars from "
+        f"{len(result['contracts'])} contract(s): {', '.join(result['contracts'])}"
+    )
+    if result['rolls']:
+        table = Table(title=f"{result['symbol']} — Roll schedule")
+        table.add_column("From", style="cyan")
+        table.add_column("To", style="cyan")
+        table.add_column("Roll (UTC)", style="dim")
+        table.add_column("Ratio", justify="right", style="yellow")
+        for r in result['rolls']:
+            table.add_row(r['from'], r['to'], str(r['roll_ts']), f"{r['ratio']:.4f}")
+        console.print(table)
+    else:
+        console.print("[dim]Single active contract — no rolls (series = front month).[/dim]")
+
+
 # ─── Shared bulk fetch logic ───────────────────────────────
 def _resolve_watchlist(list_name):
     """Resolve a watchlist name to its tickers. Returns tickers or None."""

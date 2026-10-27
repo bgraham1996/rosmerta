@@ -13,13 +13,14 @@ Key changes from the original 1-minute bar fetcher:
 """
 
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from ib_insync import *
 import logging
 import nest_asyncio
 import psycopg2
 
 from price_retrival.ohlcv_store import upsert_hourly_bars
+from price_retrival import futures as futures_registry
 
 # Allow nested event loops (needed if running from Jupyter/IPython)
 nest_asyncio.apply()
@@ -320,6 +321,262 @@ class IBStockDataFetcher:
 
         except Exception as e:
             self.logger.error(f"Error fetching data for {ticker}: {e}")
+            return None
+
+    # ---------------------------------------------------------
+    # Futures (contracts-as-stocks) — Phase A: single named contract
+    # ---------------------------------------------------------
+    @staticmethod
+    def _to_utc(dt):
+        """Normalise an IB bar timestamp to a **tz-aware UTC** datetime.
+
+        IB returns futures bars tz-aware in exchange-local time (e.g. CME /
+        Central). We keep tzinfo as UTC rather than dropping it: ``price_hourly.
+        timestamp`` is ``TIMESTAMPTZ``, so a *naive* value would be reinterpreted
+        in the DB session timezone (observed: ``Europe/London``) and land at the
+        wrong instant (e.g. a 22:00Z bar stored as 21:00Z in summer). Passing a
+        tz-aware UTC value stores the exact instant regardless of session tz, and
+        ``data_models.Asset`` queries this column with UTC-aware bounds, so true
+        instants are what the analysis layer compares against. A naive input is
+        assumed already-UTC. (The equity path already stores tz-aware exchange-local
+        timestamps — ``_save_bars_to_db`` passes ``row.date`` with tzinfo intact — so
+        its instants are correct; its ``.replace(tzinfo=None)`` is pagination-only.)
+        """
+        if getattr(dt, 'tzinfo', None) is None:
+            d = dt if isinstance(dt, datetime) else datetime(dt.year, dt.month, dt.day)
+            return d.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
+    def get_futures_hourly_bars(self, root, expiry, exchange,
+                                currency='USD', start_date=None, end_date=None,
+                                save_to_db=True, include_expired=False):
+        """Fetch hourly OHLCV bars for a single named futures contract and store
+        them (UTC) under the contracts-as-stocks model.
+
+        Args:
+            root:       futures root symbol, e.g. ``'ES'``.
+            expiry:     IB ``lastTradeDateOrContractMonth`` — ``'YYYYMMDD'`` or
+                        ``'YYYYMM'``. Required: a bare root is ambiguous and
+                        fails qualification.
+            exchange:   the real exchange, e.g. ``'CME'`` (never ``'SMART'``).
+            currency:   contract currency. Default ``'USD'``.
+            start_date: ``'YYYY-MM-DD'`` (UTC) lower bound. Default: 30d before end.
+            end_date:   ``'YYYY-MM-DD'`` (UTC) upper bound. Default: now (UTC).
+            save_to_db: register the contract + persist candles when a DB is configured.
+
+        Bars arrive tz-aware in exchange-local time; every timestamp is converted
+        to **UTC** before the upsert (see ``_to_utc_naive``). Uses ``useRTH=False``
+        (futures trade ~23h) and ``whatToShow='TRADES'``, reusing the 30-day
+        chunking pattern. Registers the contract (normalised symbol, expiry,
+        multiplier, ``ib_con_id``) via ``price_retrival.futures`` and writes
+        candles through the shared ``ohlcv_store``. Returns the qualified
+        ``pd.DataFrame`` (UTC-naive ``date``) or ``None`` on error.
+        """
+        try:
+            if not self.ib.isConnected():
+                if not self.connect():
+                    return None
+
+            # Default / parse the UTC window.
+            end_dt = (datetime.now(timezone.utc) if end_date is None
+                      else datetime.strptime(end_date, '%Y-%m-%d').replace(tzinfo=timezone.utc))
+            start_dt = (end_dt - timedelta(days=30) if start_date is None
+                        else datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc))
+
+            # Qualify the specific contract (root + expiry → single conId).
+            # include_expired lets us backfill already-expired contracts (needed
+            # for a continuous series spanning past rolls).
+            contract = Future(root, str(expiry), exchange, currency=currency,
+                              includeExpired=include_expired)
+            qualified = self.ib.qualifyContracts(contract)
+            if not qualified:
+                self.logger.error(
+                    f"Could not qualify futures contract {root} {expiry} on {exchange} "
+                    f"(a bare root is ambiguous — pass lastTradeDateOrContractMonth)"
+                )
+                return None
+            contract = qualified[0]
+
+            # Fetch in 30-day chunks, newest first; futures = ~23h session.
+            all_bars = []
+            current_end = end_dt
+            while current_end > start_dt:
+                request_days = min(30, (current_end - start_dt).days + 1)
+                duration_str = f"{request_days} D"
+                self.logger.info(
+                    f"Fetching {contract.localSymbol} hourly bars: chunk ending "
+                    f"{current_end.strftime('%Y%m%d %H:%M:%S')} UTC, duration {duration_str}"
+                )
+                bars = self.ib.reqHistoricalData(
+                    contract,
+                    endDateTime=current_end,
+                    durationStr=duration_str,
+                    barSizeSetting='1 hour',
+                    whatToShow='TRADES',
+                    useRTH=False,
+                    formatDate=1,
+                    keepUpToDate=False,
+                    timeout=60,
+                )
+                if bars:
+                    all_bars.extend(bars)
+                    current_end = self._to_utc(bars[0].date) - timedelta(hours=1)
+                else:
+                    self.logger.warning(f"No data for period ending {current_end}")
+                    break
+                self.ib.sleep(1)
+
+            if not all_bars:
+                self.logger.warning(f"No data retrieved for {root} {expiry}")
+                return None
+
+            # Convert to tz-aware UTC candles, de-duped last-wins by timestamp.
+            candles = {}
+            for b in all_bars:
+                ts = self._to_utc(b.date)
+                candles[ts] = (ts, b.open, b.high, b.low, b.close, int(b.volume))
+            candles = [candles[ts] for ts in sorted(candles)]
+
+            df = pd.DataFrame(
+                [(ts, o, h, l, c, v) for ts, o, h, l, c, v in candles],
+                columns=['date', 'open', 'high', 'low', 'close', 'volume'],
+            )
+            self.logger.info(f"Retrieved {len(df)} hourly bars for {contract.localSymbol}")
+
+            if save_to_db and self.db_config:
+                if not self.db_conn or self.db_conn.closed:
+                    self.connect_db()
+
+                norm_symbol = futures_registry.normalise_future_symbol(
+                    root, contract.lastTradeDateOrContractMonth
+                )
+                expiry_date = datetime.strptime(
+                    contract.lastTradeDateOrContractMonth[:8], '%Y%m%d'
+                ).date() if len(contract.lastTradeDateOrContractMonth) >= 8 else None
+                multiplier = float(contract.multiplier) if contract.multiplier else None
+
+                stock_id = futures_registry.register_contract(
+                    self.db_conn, root_symbol=root, symbol=norm_symbol,
+                    expiry=expiry_date, multiplier=multiplier,
+                    exchange=contract.exchange or exchange, currency=currency,
+                    ib_con_id=contract.conId,
+                )
+                n = upsert_hourly_bars(self.db_conn, stock_id, candles)
+                self.logger.info(
+                    f"Registered {norm_symbol} (stock_id={stock_id}, conId={contract.conId}) "
+                    f"and saved {n} UTC bars"
+                )
+                self._log_fetch(stock_id, 'price_hourly',
+                                start_dt, end_dt, len(df), 'success')
+
+            return df
+
+        except Exception as e:
+            self.logger.error(f"Error fetching futures {root} {expiry}: {e}")
+            return None
+
+    # ---------------------------------------------------------
+    # Futures — Phase B: term-structure registration
+    # ---------------------------------------------------------
+    def register_futures_term_structure(self, root, exchange, currency='USD',
+                                        include_expired=False, name=None):
+        """Enumerate a futures root's live contracts and register the whole term
+        structure (root + every contract) in one idempotent pass.
+
+        Uses ``reqContractDetails(Future(root, exchange=...))`` — the clean way to
+        get the full chain (one call returns every live contract with its
+        ``conId`` / ``lastTradeDateOrContractMonth`` / ``multiplier``), avoiding
+        the ambiguity of qualifying a bare root. Each contract is mapped by the
+        pure ``futures.normalise_ib_future`` and persisted via
+        ``futures.register_term_structure``. **No candles are fetched here** — this
+        is the registration pass; pull bars per contract with
+        ``get_futures_hourly_bars``.
+
+        Returns a list of ``(normalised_symbol, stock_id)`` (expiry order), or
+        ``None`` on connection error / ``[]`` if the root has no contracts.
+        """
+        try:
+            if not self.ib.isConnected():
+                if not self.connect():
+                    return None
+
+            details = self.ib.reqContractDetails(
+                Future(root, exchange=exchange, currency=currency,
+                       includeExpired=include_expired)
+            )
+            if not details:
+                self.logger.warning(f"No contracts found for futures root {root} on {exchange}")
+                return []
+
+            contracts = [futures_registry.normalise_ib_future(cd.contract) for cd in details]
+            self.logger.info(
+                f"Enumerated {len(contracts)} {root} contracts on {exchange}: "
+                f"{', '.join(sorted(c['symbol'] for c in contracts))}"
+            )
+
+            if not self.db_config:
+                self.logger.warning("No db_config — term structure not persisted")
+                return []
+            if not self.db_conn or self.db_conn.closed:
+                self.connect_db()
+
+            results = futures_registry.register_term_structure(
+                self.db_conn, root, contracts, name=name
+            )
+            self.logger.info(f"Registered {len(results)} {root} contracts under root")
+            return results
+
+        except Exception as e:
+            self.logger.error(f"Error registering futures term structure for {root}: {e}")
+            return None
+
+    # ---------------------------------------------------------
+    # Futures — Phase C: front-month selection ("fetch the active contract")
+    # ---------------------------------------------------------
+    def get_front_month_hourly_bars(self, root, exchange, currency='USD',
+                                    start_date=None, end_date=None, as_of=None,
+                                    register=True, save_to_db=True):
+        """Fetch hourly bars for a root's **front-month** contract in one call.
+
+        Ensures the term structure is registered (Phase B enumeration, unless
+        ``register=False`` and the chain is already in the DB), selects the front
+        contract (nearest unexpired expiry — ``futures.get_front_contract``), then
+        delegates to ``get_futures_hourly_bars`` for that contract. ``as_of`` picks
+        the reference date for "unexpired" (default: today UTC).
+
+        Returns ``(front_symbol, df)``, or ``None`` if no active contract is found
+        (e.g. the chain is empty or fully expired — enumerate a fresher one).
+        Roll across contracts / continuous series are deferred.
+        """
+        try:
+            if not self.db_config:
+                self.logger.error("get_front_month_hourly_bars requires a DB (contract registry)")
+                return None
+            if not self.db_conn or self.db_conn.closed:
+                self.connect_db()
+
+            if register:
+                if self.register_futures_term_structure(root, exchange, currency=currency) is None:
+                    return None
+
+            front = futures_registry.get_front_contract(self.db_conn, root, as_of=as_of)
+            if not front:
+                self.logger.warning(
+                    f"No unexpired {root} contract found "
+                    f"(as_of={as_of or 'today'}); nothing to fetch"
+                )
+                return None
+
+            front_symbol, expiry = front[1], futures_registry._as_date(front[2])
+            self.logger.info(f"Front-month {root} = {front_symbol} (expiry {expiry})")
+            df = self.get_futures_hourly_bars(
+                root, expiry.strftime('%Y%m%d'), exchange, currency=currency,
+                start_date=start_date, end_date=end_date, save_to_db=save_to_db,
+            )
+            return (front_symbol, df)
+
+        except Exception as e:
+            self.logger.error(f"Error fetching front-month bars for {root}: {e}")
             return None
 
     # ---------------------------------------------------------
