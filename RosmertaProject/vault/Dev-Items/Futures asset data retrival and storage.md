@@ -32,8 +32,10 @@ Extend the pipeline beyond equities to **futures**: retrieve and store futures O
 - [[Futures schema - contracts as stocks]] — the migration(s).
 - [[Futures OHLCV storage and retrieval]] — store/serve candles per contract + per root.
 
-**Deferred (explicitly out of the near-term slice):**
-- [[Futures IB retrieval]] — IB `Future` / `ContFuture` fetch, `useRTH=False`, roll / front-month, 30-day chunking. *Not now.*
+**Cycle-2 (now in progress):**
+- [[Futures IB retrieval]] — **In Progress (2026-10-27).** IB `Future` / `ContFuture` fetch, `useRTH=False`, roll / front-month, 30-day chunking. Live read-only gateway probe done: `reqContractDetails` enumerates the term structure (21 live ES contracts), `conId`→`ib_con_id`, normalised symbol must be constructed from `lastTradeDateOrContractMonth` (not IB's ambiguous `localSymbol`), and futures bars return tz-aware Central time (UTC-normalisation decision pending). Findings + phased plan live in that item.
+
+**Still deferred:**
 - [[Futures in Asset and Market]] — how the analysis classes consume futures (shared path vs parallel). *Not now.*
 
 # Design principle
