@@ -132,14 +132,16 @@ def test_build_records_dedups_last_wins_and_sorts():
         (_utc(2026, 10, 1, 10), 4505, 4520, 4500, 4515, 1200),
         (_utc(2026, 10, 1, 10), 4505, 4520, 4500, 4518, 1250),  # dup -> wins
     ]
-    recs = ohlcv_store._build_records(7, candles)
+    recs = ohlcv_store._build_records(7, "1 hour", candles)
+    # record shape: (stock_id, ts, bar_size, open, high, low, close, volume)
     assert [r[1] for r in recs] == [_utc(2026, 10, 1, 10), _utc(2026, 10, 1, 11)]
-    assert recs[0][5] == 4518 and recs[0][6] == 1250  # last-wins close/volume
+    assert recs[0][6] == 4518 and recs[0][7] == 1250  # last-wins close/volume
     assert all(r[0] == 7 for r in recs)  # stock_id stamped in
+    assert all(r[2] == "1 hour" for r in recs)  # bar_size stamped in
 
 
 def test_build_records_empty():
-    assert ohlcv_store._build_records(1, []) == []
+    assert ohlcv_store._build_records(1, "1 hour", []) == []
 
 
 def test_upsert_and_read_roundtrip(priced):
@@ -164,7 +166,8 @@ def test_upsert_overwrites_on_conflict(priced):
     corrected = [(_utc(2026, 10, 1, 10), 4505, 4520, 4500, 9999, 1)]
     ohlcv_store.upsert_hourly_bars(conn, 42, corrected)
     row = [r for r in db.prices[42] if r[1] == _utc(2026, 10, 1, 10)][0]
-    assert row[5] == 9999  # close updated in place
+    # stored shape: (stock_id, ts, bar_size, open, high, low, close, volume)
+    assert row[6] == 9999  # close updated in place
     assert len(db.prices[42]) == 3  # still no new row
 
 
@@ -172,6 +175,24 @@ def test_upsert_empty_is_noop(priced):
     db, conn = priced
     assert ohlcv_store.upsert_hourly_bars(conn, 42, []) == 0
     assert 42 not in db.prices
+
+
+def test_bar_sizes_coexist_at_same_instant(priced):
+    # The point of the generalised price_bars table: an hourly and a 1-minute
+    # bar for the same (stock_id, timestamp) must NOT collide — they differ on
+    # bar_size. Each size reads back only its own candles.
+    db, conn = priced
+    ts = _utc(2026, 10, 1, 10)
+    ohlcv_store.upsert_bars(conn, 42, [(ts, 4505, 4520, 4500, 4515, 1200)], bar_size="1 hour")
+    ohlcv_store.upsert_bars(conn, 42, [(ts, 4510, 4512, 4509, 4511, 30)], bar_size="1 min")
+
+    hourly = ohlcv_store.read_bars(conn, 42, bar_size="1 hour")
+    minute = ohlcv_store.read_bars(conn, 42, bar_size="1 min")
+    assert len(hourly) == 1 and len(minute) == 1  # both survive, no overwrite
+    assert hourly[0][1] == ts and minute[0][1] == ts
+    assert hourly[0][5] == 4515 and minute[0][5] == 4511  # distinct closes
+    # The hourly back-compat wrapper sees only the hourly bar.
+    assert ohlcv_store.read_hourly_bars(conn, 42) == hourly
 
 
 # --------------------------------------------------------------------------
