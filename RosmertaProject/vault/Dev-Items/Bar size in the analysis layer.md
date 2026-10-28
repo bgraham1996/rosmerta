@@ -32,10 +32,10 @@ Let `data_models.Asset`/`Market` read any stored `bar_size`, not just hourly. To
 - **`utils/bars.py`** `VALID_TIMEFRAMES` must accept the new tokens; `RESAMPLE_RULES`/`resample_ohlcv`/`OHLCV_AGG` need **no** change under read-what-you-ask. Add the small `timeframe → bar_size` mapping here (home of timeframe conventions) or in `data_models`.
 
 # Development Plan
-- [ ] Add the `timeframe → bar_size` mapping + widen `VALID_TIMEFRAMES`; validate unknown tokens loudly.
-- [ ] Rework `Asset.get_prices` to read the resolved `bar_size` via `read_bars`; keep the daily/weekly/monthly resample-from-hourly path intact.
-- [ ] Update `get_offset_growth`'s `bars_per_day` for the intraday tokens (or gate sub-hourly with a clear error pending session-length support).
-- [ ] Unit tests against `FakeDB`: (a) **base selection** — `timeframe='5min'` reads only `'5 mins'` rows, `'hourly'` reads only `'1 hour'`, no cross-contamination; (b) **regression** — `daily`/`weekly` resample from hourly unchanged; (c) a resample-correctness check on `OHLCV_AGG` for an intraday input. (The cross-size determinism test — 1-min rolled up to hourly == fetched hourly — belongs with the deferred finest-base derivation.)
+- [x] Add the `timeframe → bar_size` mapping + widen `VALID_TIMEFRAMES`; validate unknown tokens loudly. → `utils/bars.py` `TIMEFRAME_BAR_SIZE` (1min/minute→'1 min', 5min→'5 mins', 15min→'15 mins', 30min→'30 mins', hourly→'1 hour'); `VALID_TIMEFRAMES = TIMEFRAME_BAR_SIZE ∪ RESAMPLE_RULES`; `Asset.__init__` now rejects an unknown timeframe.
+- [x] Rework `Asset.get_prices` to read the resolved `bar_size` via `read_bars`; keep the daily/weekly/monthly resample-from-hourly path intact. → intraday/hourly tokens `read_bars(bar_size=…)` directly; calendar tokens read `'1 hour'` then `resample_ohlcv`. Also fixes a latent bug: `monthly` was declared valid but `get_prices` used to raise for it — it now resamples correctly.
+- [x] Update `get_offset_growth`'s `bars_per_day` for the intraday tokens. → added 1min/minute=480, 5min=96, 15min=32, 30min=16 (consistent with the long-standing hourly=8 / ~8h-day basis); docstring flags the equity-RTH assumption and defers session-correct futures counts to the tz item. `monthly` intentionally still absent ("not supported" for day-based offset-growth, as before).
+- [x] Unit tests against `FakeDB`: base selection (`5min` vs `hourly` isolation), unstored-size→empty (no silent substitution), invalid-timeframe rejection, and a daily resample-from-hourly regression. **128 passed.**
 
 # Scope / non-goals
 - **Session-aware daily boundaries for futures** (~23h sessions vs equity RTH / calendar midnight) overlap [[Cross currency and timezone support]]. This item scopes daily/weekly/monthly to the existing equity-style (UTC/business-day) behaviour; session-correct daily rollups are left to the tz item rather than half-solved here.

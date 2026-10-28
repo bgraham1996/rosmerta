@@ -23,7 +23,10 @@ from datetime import datetime as dt
 from datetime import timezone
 import numpy as np
 
-from utils.bars import RESAMPLE_RULES, resample_ohlcv
+from utils.bars import (
+    RESAMPLE_RULES, TIMEFRAME_BAR_SIZE, VALID_TIMEFRAMES, resample_ohlcv,
+)
+from price_retrival.ohlcv_store import read_bars
 
 class Asset:
     """Price/fundamental analysis for a single ticker over a date window.
@@ -37,13 +40,22 @@ class Asset:
         conn: Open psycopg2 connection (used to resolve ``stock_id``/``name``).
         ticker: Stock symbol; must exist in the ``stocks`` table.
         start_date / end_date: UTC bounds as ``'%Y-%m-%d %H:%M:%S'`` strings.
-        timeframe: ``'hourly'`` (raw bars) or ``'daily'``/``'weekly'``
-            (resampled from hourly via ``utils.bars``).
+        timeframe: which bars to analyse. Intraday/hourly tokens read the
+            matching stored ``bar_size`` directly (read-what-you-ask) —
+            ``'1min'``/``'minute'``, ``'5min'``, ``'15min'``, ``'30min'``,
+            ``'hourly'``; calendar tokens ``'daily'``/``'weekly'``/``'monthly'``
+            resample up from the hourly base via ``utils.bars``.
 
     Raises:
-        ValueError: if ``ticker`` is not found in ``stocks``.
+        ValueError: if ``ticker`` is not found in ``stocks``, or ``timeframe``
+            is not one of ``utils.bars.VALID_TIMEFRAMES``.
     """
     def __init__(self, conn, ticker, start_date, end_date, timeframe = 'hourly'):
+        if timeframe not in VALID_TIMEFRAMES:
+            raise ValueError(
+                f"Invalid timeframe {timeframe!r}; "
+                f"expected one of {sorted(VALID_TIMEFRAMES)}"
+            )
         self.ticker = ticker
         self.timeframe = timeframe
         with conn.cursor() as cur:
@@ -72,31 +84,37 @@ class Asset:
     def get_prices(self, conn):
         """Load (and cache) OHLCV bars for this asset's window.
 
-        Reads ``price_hourly`` between ``start_date`` and ``end_date``. For
-        ``daily``/``weekly`` timeframes the hourly bars are resampled via
-        ``resample_ohlcv``. Returns the cached price DataFrame on later calls.
+        Reads ``price_bars`` between ``start_date`` and ``end_date`` at the
+        ``bar_size`` resolved from ``timeframe`` (read-what-you-ask):
+
+        - intraday/hourly tokens (``TIMEFRAME_BAR_SIZE``) read that stored
+          ``bar_size`` directly — no resampling;
+        - calendar tokens (``daily``/``weekly``/``monthly``) read the hourly
+          base and resample up via ``resample_ohlcv``.
+
+        A requested size that was never fetched simply yields an empty frame
+        (the layer never silently substitutes another granularity). Returns the
+        cached price DataFrame on later calls.
         """
         if self._prices_cache is None:
             start = dt.strptime(self.start_date, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
             end = dt.strptime(self.end_date, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT stock_id, timestamp, open, high, low, close, volume "
-                    "FROM price_hourly WHERE stock_id = %s AND timestamp >= %s AND timestamp <= %s ORDER BY timestamp ASC",
-                    (self.stock_id, start, end)
-                )
-                data = cur.fetchall()
-            columns=['stock_id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
-            data = DataFrame(data, columns=columns)
-            for col in ['open', 'close', 'high', 'low', 'volume']:
-                data[col] = data[col].astype(float)
-            if self.timeframe == 'hourly':
-                self._prices_cache = data
-            elif self.timeframe in ['daily', 'weekly']:
-                rule = RESAMPLE_RULES[self.timeframe]
-                self._prices_cache = resample_ohlcv(data, rule)
+
+            # Resolve timeframe -> (base bar_size to read, resample rule or None).
+            if self.timeframe in TIMEFRAME_BAR_SIZE:
+                base_size, rule = TIMEFRAME_BAR_SIZE[self.timeframe], None
+            elif self.timeframe in RESAMPLE_RULES:
+                base_size, rule = '1 hour', RESAMPLE_RULES[self.timeframe]
             else:
                 raise ValueError(f"None applicable timeframe aggregation applied to {self.asset_id}")
+
+            rows = read_bars(conn, self.stock_id, bar_size=base_size, start=start, end=end)
+            columns=['stock_id', 'timestamp', 'open', 'high', 'low', 'close', 'volume']
+            data = DataFrame(rows, columns=columns)
+            for col in ['open', 'close', 'high', 'low', 'volume']:
+                data[col] = data[col].astype(float)
+
+            self._prices_cache = data if rule is None else resample_ohlcv(data, rule)
             return self._prices_cache
         else:
             return self._prices_cache
@@ -309,10 +327,15 @@ class Asset:
         """Forward-looking gain ``days`` trading days after each bar.
 
         Wraps the ``days_offset_gain`` indicator with the bar-count lookahead
-        matching this asset's timeframe (8 bars/day hourly, 1 daily, 1/5
-        weekly), so e.g. ``days=30`` on hourly data looks 240 bars ahead.
-        The raw material for questions like "how often is price within
-        ±0.2% thirty days after investment".
+        matching this asset's timeframe, so e.g. ``days=30`` on hourly data
+        looks 240 bars ahead. The raw material for questions like "how often is
+        price within ±0.2% thirty days after investment".
+
+        The per-day bar counts assume an ~8-hour equity trading day (hence
+        hourly=8, 1-min=480, ...), consistent with the long-standing hourly
+        figure. Futures sessions (~23h) differ; session-correct bar counts are
+        deferred to the timezone/session work ([[Cross currency and timezone
+        support]]) — until then offset-growth on a futures asset is approximate.
 
         Returns a DataFrame of ``timestamp`` + ``gain_{days}d`` — the
         fractional (``mode='pct'``) or absolute (``mode='abs'``) change in
@@ -320,7 +343,13 @@ class Asset:
         underlying indicator is cached on the asset like any other
         (retrievable via ``get_indicator('days_offset_gain', ...)``).
         """
-        bars_per_day = {'hourly': 8, 'daily': 1, 'weekly': 1 / 5}.get(self.timeframe)
+        # 'monthly' is intentionally absent: day-based offset-growth is not
+        # meaningful on monthly bars (it falls under one bar), so it raises
+        # "not supported" as it always has.
+        bars_per_day = {
+            'minute': 480, '1min': 480, '5min': 96, '15min': 32, '30min': 16,
+            'hourly': 8, 'daily': 1, 'weekly': 1 / 5,
+        }.get(self.timeframe)
         if bars_per_day is None:
             raise ValueError(f"Offset growth not supported for timeframe '{self.timeframe}'")
         if int(days * bars_per_day) < 1:

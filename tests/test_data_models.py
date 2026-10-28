@@ -47,6 +47,53 @@ def test_get_prices_loads_and_caches(conn, date_bounds):
     assert a.get_prices(conn) is prices
 
 
+# --- Bar size in the analysis layer (read-what-you-ask) --------------------
+
+
+def test_invalid_timeframe_rejected(conn, date_bounds):
+    start, end = date_bounds
+    with pytest.raises(ValueError, match="Invalid timeframe"):
+        Asset(conn, "ACME", start, end, timeframe="2min")
+
+
+def test_reads_requested_bar_size_directly(db, conn, date_bounds, utc):
+    # One stock holding BOTH hourly and 5-minute bars at the same instants;
+    # each timeframe must read only its own granularity — no cross-contamination.
+    start, end = date_bounds
+    db.stocks["MIX"] = (9, "Mixed")
+    db.prices[9] = [  # (stock_id, ts, bar_size, o, h, l, c, v)
+        (9, utc(2024, 1, 2, 9),  "1 hour", 10.0, 11.0, 9.5, 100.0, 1000),
+        (9, utc(2024, 1, 2, 10), "1 hour", 10.5, 12.0, 10.0, 101.0, 1200),
+        (9, utc(2024, 1, 2, 9),  "5 mins", 20.0, 21.0, 19.0, 500.0, 50),
+        (9, utc(2024, 1, 2, 10), "5 mins", 20.5, 22.0, 20.0, 501.0, 60),
+    ]
+    five = Asset(conn, "MIX", start, end, timeframe="5min").get_prices(conn)
+    hourly = Asset(conn, "MIX", start, end, timeframe="hourly").get_prices(conn)
+    assert list(five["close"]) == [500.0, 501.0]
+    assert list(hourly["close"]) == [100.0, 101.0]
+
+
+def test_unstored_bar_size_yields_empty(conn, date_bounds):
+    # ACME has only hourly bars; asking for 15-min returns an empty frame —
+    # the layer never silently substitutes another size.
+    start, end = date_bounds
+    prices = Asset(conn, "ACME", start, end, timeframe="15min").get_prices(conn)
+    assert prices.empty
+    assert list(prices.columns) == [
+        "stock_id", "timestamp", "open", "high", "low", "close", "volume",
+    ]
+
+
+def test_daily_resamples_from_hourly_base(conn, date_bounds):
+    # Calendar frames still read the hourly base and resample up (unchanged).
+    start, end = date_bounds
+    daily = Asset(conn, "ACME", start, end, timeframe="daily").get_prices(conn)
+    assert len(daily) == 1  # 5 hourly bars on 2024-01-02 -> one business day
+    assert daily["open"].iloc[0] == 10.0    # first hourly open
+    assert daily["close"].iloc[0] == 12.5   # last hourly close
+    assert daily["volume"].iloc[0] == 1000.0  # 100+200+150+300+250
+
+
 def test_get_dates_requires_prices(conn, date_bounds):
     start, end = date_bounds
     a = Asset(conn, "ACME", start, end)
