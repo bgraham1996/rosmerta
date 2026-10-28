@@ -31,3 +31,17 @@ def test_start_for_uses_last_bar_day():
 def test_start_for_falls_back_when_no_history():
     assert wf._start_for(None) == wf.DEFAULT_START
     assert wf._start_for(None, default='2019-01-01') == '2019-01-01'
+
+
+def test_default_start_hourly_is_full_history():
+    # Hourly keeps the generous full-history backfill.
+    assert wf._default_start_for('1 hour') == wf.DEFAULT_START
+
+
+def test_default_start_subhourly_is_bounded_window():
+    # Sub-hourly backfills only a recent window (10 days for 1-min), not from
+    # DEFAULT_START — otherwise a fresh 1-min ticker would emit thousands of
+    # IB requests.
+    now = datetime(2026, 10, 28, 12, 0, tzinfo=timezone.utc)
+    assert wf._default_start_for('1 min', now) == '2026-10-18'  # 28 - 10 days
+    assert wf._default_start_for('15 mins', now) == '2026-08-29'  # 28 Oct - 60 days

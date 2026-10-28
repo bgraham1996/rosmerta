@@ -63,8 +63,12 @@ uv run main.py --help            # the CLI is a click.group() named `rosmerta`
 
 ### Fetch Price Data
 ```bash
-# Single ticker
+# Single ticker (hourly by default)
 uv run main.py fetch price AAPL --start 2024-01-01 --end 2024-03-31
+
+# Sub-hourly: --bar-size accepts '1 min' / '5 mins' / '15 mins' / '30 mins' / '1 hour'
+# (keep the window tight — sub-hourly issues many IB requests)
+uv run main.py fetch price AAPL -s 2026-10-20 -e 2026-10-24 --bar-size '1 min'
 
 # Skip database storage
 uv run main.py fetch price AAPL --start 2024-01-01 --end 2024-03-31 --no-db
@@ -118,7 +122,7 @@ uv run main.py dashboard --debug
 ## Commands
 
 ### Data Fetching
-- `fetch price <TICKER>` - Fetch hourly OHLCV bars from IB
+- `fetch price <TICKER>` - Fetch OHLCV bars from IB (`--bar-size`, default `1 hour`)
 - `fetch fundamentals <TICKER>` - Fetch SEC EDGAR financial statements
 - `fetch dividends <TICKER>` - Fetch dividends (EDGAR, with IB fallback)
 
@@ -126,7 +130,7 @@ uv run main.py dashboard --debug
 - `portfolio` - Show current IB positions with P&L
 
 ### Bulk Operations
-- `bulk price --list <WATCHLIST>` - Bulk price fetching
+- `bulk price --list <WATCHLIST>` - Bulk price fetching (`--bar-size`, default `1 hour`)
 - `bulk fundamentals --list <WATCHLIST>` - Bulk fundamentals fetching
 - `bulk dividends --list <WATCHLIST>` - Bulk dividends fetching
 

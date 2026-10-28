@@ -19,6 +19,11 @@ ib_flex_trades_query_id = os.getenv('IB_FLEX_TRADES_QUERY_ID')
 
 console = Console()
 
+# Supported IB bar sizes for the --bar-size options. Kept as a literal (rather
+# than importing price_retrival.ib_api.SUPPORTED_BAR_SIZES, which would eagerly
+# pull ib_insync at CLI startup) — the fetcher re-validates as the backstop.
+BAR_SIZES = ('1 min', '5 mins', '15 mins', '30 mins', '1 hour')
+
 
 
 @click.group()
@@ -54,16 +59,19 @@ def fetch():
 @click.option('--end', '-e', required=True, help='End date (YYYY-MM-DD)')
 @click.option('--exchange', default='SMART', help='IB exchange routing (default: SMART)')
 @click.option('--currency', default='USD', help='Contract currency (default: USD)')
+@click.option('--bar-size', default='1 hour', type=click.Choice(BAR_SIZES),
+              help='Bar size / timeframe (default: 1 hour)')
 @click.option('--no-db', is_flag=True, help='Skip database storage')
-def fetch_price(ticker, start, end, exchange, currency, no_db):
-    """Fetch hourly price bars from Interactive Brokers.
+def fetch_price(ticker, start, end, exchange, currency, bar_size, no_db):
+    """Fetch price bars from Interactive Brokers at the given bar size.
 
     Example: rosmerta fetch price AAPL --start 2024-01-01 --end 2024-03-31
+    Example: rosmerta fetch price AAPL -s 2026-10-20 -e 2026-10-24 --bar-size '1 min'
     """
     from price_retrival.ib_api import IBStockDataFetcher
 
     ticker = ticker.upper()
-    console.print(f"[cyan]Fetching hourly bars for {ticker}[/cyan] ({start} → {end})")
+    console.print(f"[cyan]Fetching {bar_size} bars for {ticker}[/cyan] ({start} → {end})")
 
     db_config = get_db_config(no_db)
 
@@ -77,6 +85,7 @@ def fetch_price(ticker, start, end, exchange, currency, no_db):
             exchange=exchange,
             currency=currency,
             save_to_db=not no_db,
+            bar_size=bar_size,
         )
 
     if df is None or df.empty:
@@ -84,7 +93,7 @@ def fetch_price(ticker, start, end, exchange, currency, no_db):
         return
 
     # Summary table
-    table = Table(title=f"{ticker} — Hourly Bars")
+    table = Table(title=f"{ticker} — {bar_size} Bars")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green")
 
@@ -429,15 +438,19 @@ def bulk():
 @click.option('--exchange', default='SMART', help='IB exchange routing (default: SMART)')
 @click.option('--delay', default=2, type=int,
               help='Seconds between tickers to avoid IB rate limits (default: 2)')
+@click.option('--bar-size', default='1 hour', type=click.Choice(BAR_SIZES),
+              help='Bar size / timeframe (default: 1 hour). Sub-hourly over long '
+                   'ranges issues many IB requests — keep the window tight.')
 @click.option('--dry-run', is_flag=True, default=False,
               help='Show what would be fetched without fetching')
-def bulk_price(list_name, start, end, exchange, delay, dry_run):
-    """Fetch hourly price bars for all stocks in a watchlist.
+def bulk_price(list_name, start, end, exchange, delay, bar_size, dry_run):
+    """Fetch price bars for all stocks in a watchlist at the given bar size.
 
     Example: rosmerta bulk price --list core --start 2025-01-01 --end 2025-02-01
+    Example: rosmerta bulk price -l core -s 2026-10-20 -e 2026-10-24 --bar-size '1 min'
     """
     _run_bulk_fetch(list_name, start, end, dry_run, 'price',
-                    exchange=exchange, delay=delay)
+                    exchange=exchange, delay=delay, bar_size=bar_size)
 
 
 @bulk.command('fundamentals')
@@ -597,9 +610,12 @@ def futures_list(root):
               help='Start date (YYYY-MM-DD, UTC). Default: ~30 days back.')
 @click.option('--end', '-e', default=None,
               help='End date (YYYY-MM-DD, UTC). Default: now.')
+@click.option('--bar-size', default='1 hour', type=click.Choice(BAR_SIZES),
+              help='Bar size / timeframe (default: 1 hour). Sub-hourly over long '
+                   'ranges issues many IB requests — keep the window tight.')
 @click.option('--no-db', is_flag=True, help='Skip database storage')
-def futures_fetch(root, expiry, exchange, currency, start, end, no_db):
-    """Fetch hourly bars for a futures contract (front-month by default).
+def futures_fetch(root, expiry, exchange, currency, start, end, bar_size, no_db):
+    """Fetch bars for a futures contract (front-month by default) at a bar size.
 
     With no --expiry, registers the term structure and fetches the active
     (front-month) contract. Front-month selection needs the DB, so --no-db
@@ -607,6 +623,7 @@ def futures_fetch(root, expiry, exchange, currency, start, end, no_db):
 
     Example: rosmerta futures fetch ES                   # front month
     Example: rosmerta futures fetch ES --expiry 20261218
+    Example: rosmerta futures fetch ES --expiry 20261218 --bar-size '1 min'
     """
     from price_retrival.ib_api import IBStockDataFetcher
 
@@ -619,16 +636,18 @@ def futures_fetch(root, expiry, exchange, currency, start, end, no_db):
     with IBStockDataFetcher(host='127.0.0.1', port=4001, db_config=db_config) as fetcher:
         if expiry:
             label = f"{root} {expiry}"
-            console.print(f"[cyan]Fetching {label}[/cyan] on {exchange} ({start or '~30d'} → {end or 'now'})")
+            console.print(f"[cyan]Fetching {label} {bar_size} bars[/cyan] on {exchange} ({start or '~30d'} → {end or 'now'})")
             df = fetcher.get_futures_hourly_bars(
                 root, expiry, exchange, currency=currency,
                 start_date=start, end_date=end, save_to_db=not no_db,
+                bar_size=bar_size,
             )
         else:
-            console.print(f"[cyan]Fetching {root} front-month[/cyan] on {exchange} ({start or '~30d'} → {end or 'now'})")
+            console.print(f"[cyan]Fetching {root} front-month {bar_size} bars[/cyan] on {exchange} ({start or '~30d'} → {end or 'now'})")
             out = fetcher.get_front_month_hourly_bars(
                 root, exchange, currency=currency,
                 start_date=start, end_date=end, save_to_db=not no_db,
+                bar_size=bar_size,
             )
             if out is None:
                 console.print(f"[red]No active {root} contract found (register the chain first?).[/red]")
@@ -639,7 +658,7 @@ def futures_fetch(root, expiry, exchange, currency, start, end, no_db):
         console.print(f"[red]No data retrieved for {label}[/red]")
         return
 
-    table = Table(title=f"{label} — Hourly Bars")
+    table = Table(title=f"{label} — {bar_size} Bars")
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green")
     table.add_row("Bars fetched", str(len(df)))
@@ -794,7 +813,7 @@ def _show_results(results, list_name, record_label='Records'):
 
 def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
                     exchange='SMART', delay=2, force=False, max_age_days=30,
-                    try_ib_fallback=True):
+                    try_ib_fallback=True, bar_size='1 hour'):
     """Shared implementation for bulk price, fundamentals, and dividends."""
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
     from price_retrival.bulk_fetch import (
@@ -851,6 +870,7 @@ def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
                 db_config=db_config,
                 exchange=exchange,
                 delay=delay,
+                bar_size=bar_size,
                 on_ticker_start=on_start,
                 on_ticker_complete=on_complete,
             )
