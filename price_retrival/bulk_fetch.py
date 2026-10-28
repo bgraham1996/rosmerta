@@ -105,11 +105,12 @@ def bulk_fetch_prices(
     ib_port=4001,
     exchange='SMART',
     delay=2,
+    bar_size='1 hour',
     on_ticker_start=None,
     on_ticker_complete=None,
 ):
     """
-    Fetch hourly price bars for a list of tickers.
+    Fetch price bars at ``bar_size`` for a list of tickers.
 
     Args:
         tickers: list of dicts with 'symbol', 'exchange', 'currency' keys
@@ -120,6 +121,7 @@ def bulk_fetch_prices(
         ib_port: IB Gateway port
         exchange: IB exchange routing
         delay: seconds between tickers
+        bar_size: IB barSizeSetting (default '1 hour'); see IBStockDataFetcher
         on_ticker_start: optional callback(index, symbol) called before each fetch
         on_ticker_complete: optional callback(index, result) called after each fetch
 
@@ -146,6 +148,7 @@ def bulk_fetch_prices(
             ib_host=ib_host,
             ib_port=ib_port,
             exchange=exchange,
+            bar_size=bar_size,
         )
         results.append(result)
 
@@ -160,7 +163,7 @@ def bulk_fetch_prices(
 
 
 def _fetch_single_ticker(symbol, currency, start, end, db_config,
-                         ib_host, ib_port, exchange):
+                         ib_host, ib_port, exchange, bar_size='1 hour'):
     """Fetch a single ticker with its own IB connection. Returns FetchResult."""
     from price_retrival.ib_api import IBStockDataFetcher
 
@@ -177,6 +180,7 @@ def _fetch_single_ticker(symbol, currency, start, end, db_config,
                 exchange=exchange,
                 currency=currency,
                 save_to_db=True,
+                bar_size=bar_size,
             )
 
         if df is not None and not df.empty:

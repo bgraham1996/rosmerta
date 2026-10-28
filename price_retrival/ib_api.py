@@ -19,11 +19,72 @@ import logging
 import nest_asyncio
 import psycopg2
 
-from price_retrival.ohlcv_store import upsert_hourly_bars
+from price_retrival.ohlcv_store import upsert_bars
 from price_retrival import futures as futures_registry
 
 # Allow nested event loops (needed if running from Jupyter/IPython)
 nest_asyncio.apply()
+
+
+# ---------------------------------------------------------------------------
+# Bar-size-aware retrieval helpers (board item "Bar-size aware IB retrieval")
+# ---------------------------------------------------------------------------
+# IB caps how much history one reqHistoricalData call returns (by bar count /
+# pacing). A 1-minute request packs ~60x the bars of an hourly one, so the
+# per-request window must shrink as the bar size shrinks. Values are the max
+# number of DAYS of history to ask for in a single chunk; the existing
+# day-based chunk arithmetic is reused unchanged.
+_CHUNK_DAYS = {
+    '1 min': 1,
+    '5 mins': 5,
+    '15 mins': 10,
+    '30 mins': 20,
+    '1 hour': 30,
+}
+
+# Step the chunk window back by exactly one bar between requests, so successive
+# chunks neither leave a gap (a fixed 1-hour step would skip 59 minutes of
+# 1-minute bars) nor matter if they overlap (the upsert de-dups last-wins).
+_BAR_INTERVAL = {
+    '1 min': timedelta(minutes=1),
+    '5 mins': timedelta(minutes=5),
+    '15 mins': timedelta(minutes=15),
+    '30 mins': timedelta(minutes=30),
+    '1 hour': timedelta(hours=1),
+}
+
+# IB barSizeSetting strings this fetcher supports, smallest first.
+SUPPORTED_BAR_SIZES = tuple(_CHUNK_DAYS)
+
+
+def _chunk_days(bar_size):
+    """Max days of history to request per chunk for ``bar_size``.
+
+    Raises ``ValueError`` for an unsupported size so a bad request fails loudly
+    rather than sending IB a duration it will reject (or silently truncate).
+    """
+    try:
+        return _CHUNK_DAYS[bar_size]
+    except KeyError:
+        raise ValueError(
+            f"Unsupported bar_size {bar_size!r}; "
+            f"supported: {', '.join(SUPPORTED_BAR_SIZES)}"
+        )
+
+
+def _bar_interval(bar_size):
+    """The ``timedelta`` of one ``bar_size`` bar (chunk step-back amount)."""
+    return _BAR_INTERVAL[bar_size]
+
+
+def _fetch_log_type(bar_size):
+    """``fetch_log.data_type`` label for a bar size.
+
+    ``'1 hour'`` keeps the legacy ``'price_hourly'`` label so existing
+    fetch_log queries/history stay valid; other sizes become
+    ``'price_<size>'`` (e.g. ``'1 min'`` -> ``'price_1_min'``).
+    """
+    return 'price_hourly' if bar_size == '1 hour' else 'price_' + bar_size.replace(' ', '_')
 
 
 class IBStockDataFetcher:
@@ -154,13 +215,13 @@ class IBStockDataFetcher:
             self.logger.info(f"Created stock record: {symbol} ({exchange}) -> id {stock_id}")
             return stock_id
 
-    def _save_bars_to_db(self, stock_id, df):
+    def _save_bars_to_db(self, stock_id, df, bar_size='1 hour'):
         """
-        Upsert hourly bars into the price_hourly table.
+        Upsert bars into ``price_bars`` at the given ``bar_size``.
 
         Thin IB adapter over the source-agnostic candle store: it converts the
         ib-insync DataFrame into ``(ts, o, h, l, c, v)`` tuples and delegates
-        the actual upsert to ``ohlcv_store.upsert_hourly_bars`` so IB, futures,
+        the actual upsert to ``ohlcv_store.upsert_bars`` so IB, futures,
         and any future non-IB source share one write path. ON CONFLICT still
         handles re-fetches gracefully.
         """
@@ -174,8 +235,10 @@ class IBStockDataFetcher:
         ]
 
         try:
-            n = upsert_hourly_bars(self.db_conn, stock_id, candles)
-            self.logger.info(f"Saved {n} bars to database for stock_id={stock_id}")
+            n = upsert_bars(self.db_conn, stock_id, candles, bar_size=bar_size)
+            self.logger.info(
+                f"Saved {n} {bar_size} bars to database for stock_id={stock_id}"
+            )
             return True
         except Exception as e:
             self.logger.error(f"Error saving bars to DB: {e}")
@@ -207,9 +270,9 @@ class IBStockDataFetcher:
     # ---------------------------------------------------------
     def get_hourly_bars(self, ticker, start_date, end_date,
                         exchange='SMART', currency='USD',
-                        save_to_db=True):
+                        save_to_db=True, bar_size='1 hour'):
         """
-        Fetch hourly OHLCV bar data for a stock.
+        Fetch OHLCV bar data for a stock at a given ``bar_size``.
 
         Args:
             ticker:     Stock ticker symbol (e.g. 'AAPL', 'MSFT').
@@ -219,12 +282,25 @@ class IBStockDataFetcher:
             currency:   Contract currency. Default 'USD'.
             save_to_db: If True and db_config was provided, save bars
                         directly to PostgreSQL.
+            bar_size:   IB barSizeSetting — one of ``SUPPORTED_BAR_SIZES``
+                        ('1 min', '5 mins', '15 mins', '30 mins', '1 hour').
+                        Default '1 hour' (the method name is historical). The
+                        per-request window shrinks for finer sizes (see
+                        ``_CHUNK_DAYS``); ``useRTH=True`` is kept, so sub-hourly
+                        equity bars cover regular trading hours only.
 
         Returns:
             pd.DataFrame with columns: date, open, high, low, close, volume.
-            None on error.
+            None on error (including an unsupported ``bar_size``).
         """
         try:
+            # Validate bar size up front (loud failure beats an IB rejection).
+            try:
+                chunk_days = _chunk_days(bar_size)
+            except ValueError as e:
+                self.logger.error(str(e))
+                return None
+
             # Ensure IB connection
             if not self.ib.isConnected():
                 if not self.connect():
@@ -244,17 +320,18 @@ class IBStockDataFetcher:
                 return None
             contract = qualified[0]
 
-            # Fetch in chunks — IB allows up to 365 days for hourly bars,
-            # but 30-day chunks are more reliable and kinder to rate limits.
+            # Fetch newest-first in per-bar-size chunks (finer bars -> smaller
+            # window; see _CHUNK_DAYS) to stay within IB's bar-count/pacing caps.
             all_bars = []
             current_end = end_date
+            step = _bar_interval(bar_size)
 
             while current_end > start_date:
-                request_days = min(30, (current_end - start_date).days + 1)
+                request_days = min(chunk_days, (current_end - start_date).days + 1)
                 duration_str = f"{request_days} D"
 
                 self.logger.info(
-                    f"Fetching {ticker} hourly bars: "
+                    f"Fetching {ticker} {bar_size} bars: "
                     f"chunk ending {current_end.strftime('%Y%m%d %H:%M:%S')}, "
                     f"duration {duration_str}"
                 )
@@ -263,7 +340,7 @@ class IBStockDataFetcher:
                     contract,
                     endDateTime=current_end.strftime('%Y%m%d %H:%M:%S'),
                     durationStr=duration_str,
-                    barSizeSetting='1 hour',
+                    barSizeSetting=bar_size,
                     whatToShow='TRADES',
                     useRTH=True,
                     formatDate=1,
@@ -273,8 +350,8 @@ class IBStockDataFetcher:
 
                 if bars:
                     all_bars.extend(bars)
-                    # Move window back past the earliest bar we just received
-                    current_end = bars[0].date.replace(tzinfo=None) - timedelta(hours=1)
+                    # Move the window back one bar past the earliest we received.
+                    current_end = bars[0].date.replace(tzinfo=None) - step
                 else:
                     self.logger.warning(f"No data for period ending {current_end}")
                     break
@@ -299,7 +376,7 @@ class IBStockDataFetcher:
                    (df['date'].dt.date <= end_date.date())
             df = df[mask].sort_values('date').reset_index(drop=True)
 
-            self.logger.info(f"Retrieved {len(df)} hourly bars for {ticker}")
+            self.logger.info(f"Retrieved {len(df)} {bar_size} bars for {ticker}")
 
             # Persist to database if configured
             if save_to_db and self.db_config:
@@ -310,9 +387,9 @@ class IBStockDataFetcher:
                     ticker, contract.exchange, currency
                 )
                 if stock_id:
-                    self._save_bars_to_db(stock_id, df)
+                    self._save_bars_to_db(stock_id, df, bar_size=bar_size)
                     self._log_fetch(
-                        stock_id, 'price_hourly',
+                        stock_id, _fetch_log_type(bar_size),
                         start_date, end_date,
                         len(df), 'success'
                     )
@@ -349,9 +426,10 @@ class IBStockDataFetcher:
 
     def get_futures_hourly_bars(self, root, expiry, exchange,
                                 currency='USD', start_date=None, end_date=None,
-                                save_to_db=True, include_expired=False):
-        """Fetch hourly OHLCV bars for a single named futures contract and store
-        them (UTC) under the contracts-as-stocks model.
+                                save_to_db=True, include_expired=False,
+                                bar_size='1 hour'):
+        """Fetch OHLCV bars for a single named futures contract at a given
+        ``bar_size`` and store them (UTC) under the contracts-as-stocks model.
 
         Args:
             root:       futures root symbol, e.g. ``'ES'``.
@@ -363,16 +441,25 @@ class IBStockDataFetcher:
             start_date: ``'YYYY-MM-DD'`` (UTC) lower bound. Default: 30d before end.
             end_date:   ``'YYYY-MM-DD'`` (UTC) upper bound. Default: now (UTC).
             save_to_db: register the contract + persist candles when a DB is configured.
+            bar_size:   IB barSizeSetting — one of ``SUPPORTED_BAR_SIZES``. Default
+                        '1 hour'. Note the default 30-day window is large for
+                        sub-hourly sizes; pass a tighter start_date for those.
 
         Bars arrive tz-aware in exchange-local time; every timestamp is converted
-        to **UTC** before the upsert (see ``_to_utc_naive``). Uses ``useRTH=False``
-        (futures trade ~23h) and ``whatToShow='TRADES'``, reusing the 30-day
-        chunking pattern. Registers the contract (normalised symbol, expiry,
-        multiplier, ``ib_con_id``) via ``price_retrival.futures`` and writes
-        candles through the shared ``ohlcv_store``. Returns the qualified
-        ``pd.DataFrame`` (UTC-naive ``date``) or ``None`` on error.
+        to **UTC** before the upsert (see ``_to_utc``). Uses ``useRTH=False``
+        (futures trade ~23h) and ``whatToShow='TRADES'``, with per-bar-size
+        chunking (``_CHUNK_DAYS``). Registers the contract (normalised symbol,
+        expiry, multiplier, ``ib_con_id``) via ``price_retrival.futures`` and
+        writes candles (at ``bar_size``) through the shared ``ohlcv_store``.
+        Returns the qualified ``pd.DataFrame`` (UTC ``date``) or ``None`` on error.
         """
         try:
+            try:
+                chunk_days = _chunk_days(bar_size)
+            except ValueError as e:
+                self.logger.error(str(e))
+                return None
+
             if not self.ib.isConnected():
                 if not self.connect():
                     return None
@@ -397,21 +484,22 @@ class IBStockDataFetcher:
                 return None
             contract = qualified[0]
 
-            # Fetch in 30-day chunks, newest first; futures = ~23h session.
+            # Fetch newest-first in per-bar-size chunks; futures = ~23h session.
             all_bars = []
             current_end = end_dt
+            step = _bar_interval(bar_size)
             while current_end > start_dt:
-                request_days = min(30, (current_end - start_dt).days + 1)
+                request_days = min(chunk_days, (current_end - start_dt).days + 1)
                 duration_str = f"{request_days} D"
                 self.logger.info(
-                    f"Fetching {contract.localSymbol} hourly bars: chunk ending "
+                    f"Fetching {contract.localSymbol} {bar_size} bars: chunk ending "
                     f"{current_end.strftime('%Y%m%d %H:%M:%S')} UTC, duration {duration_str}"
                 )
                 bars = self.ib.reqHistoricalData(
                     contract,
                     endDateTime=current_end,
                     durationStr=duration_str,
-                    barSizeSetting='1 hour',
+                    barSizeSetting=bar_size,
                     whatToShow='TRADES',
                     useRTH=False,
                     formatDate=1,
@@ -420,7 +508,7 @@ class IBStockDataFetcher:
                 )
                 if bars:
                     all_bars.extend(bars)
-                    current_end = self._to_utc(bars[0].date) - timedelta(hours=1)
+                    current_end = self._to_utc(bars[0].date) - step
                 else:
                     self.logger.warning(f"No data for period ending {current_end}")
                     break
@@ -441,7 +529,7 @@ class IBStockDataFetcher:
                 [(ts, o, h, l, c, v) for ts, o, h, l, c, v in candles],
                 columns=['date', 'open', 'high', 'low', 'close', 'volume'],
             )
-            self.logger.info(f"Retrieved {len(df)} hourly bars for {contract.localSymbol}")
+            self.logger.info(f"Retrieved {len(df)} {bar_size} bars for {contract.localSymbol}")
 
             if save_to_db and self.db_config:
                 if not self.db_conn or self.db_conn.closed:
@@ -461,12 +549,12 @@ class IBStockDataFetcher:
                     exchange=contract.exchange or exchange, currency=currency,
                     ib_con_id=contract.conId,
                 )
-                n = upsert_hourly_bars(self.db_conn, stock_id, candles)
+                n = upsert_bars(self.db_conn, stock_id, candles, bar_size=bar_size)
                 self.logger.info(
                     f"Registered {norm_symbol} (stock_id={stock_id}, conId={contract.conId}) "
-                    f"and saved {n} UTC bars"
+                    f"and saved {n} UTC {bar_size} bars"
                 )
-                self._log_fetch(stock_id, 'price_hourly',
+                self._log_fetch(stock_id, _fetch_log_type(bar_size),
                                 start_dt, end_dt, len(df), 'success')
 
             return df
@@ -535,7 +623,8 @@ class IBStockDataFetcher:
     # ---------------------------------------------------------
     def get_front_month_hourly_bars(self, root, exchange, currency='USD',
                                     start_date=None, end_date=None, as_of=None,
-                                    register=True, save_to_db=True):
+                                    register=True, save_to_db=True,
+                                    bar_size='1 hour'):
         """Fetch hourly bars for a root's **front-month** contract in one call.
 
         Ensures the term structure is registered (Phase B enumeration, unless
@@ -572,6 +661,7 @@ class IBStockDataFetcher:
             df = self.get_futures_hourly_bars(
                 root, expiry.strftime('%Y%m%d'), exchange, currency=currency,
                 start_date=start_date, end_date=end_date, save_to_db=save_to_db,
+                bar_size=bar_size,
             )
             return (front_symbol, df)
 
