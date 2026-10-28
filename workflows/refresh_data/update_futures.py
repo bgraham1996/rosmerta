@@ -49,11 +49,24 @@ ROOTS = ('ES',)             # futures roots to refresh
 EXCHANGE = 'CME'            # real exchange (never SMART for futures)
 CURRENCY = 'USD'
 HISTORY_CONTRACTS = 4       # prior contracts to fetch behind the front (ES: 4 = ~1yr)
-LOOKBACK_DAYS = 220         # backfill window per contract with no stored bars yet
+LOOKBACK_DAYS = 220         # backfill window per contract with no stored bars yet (hourly)
 INCLUDE_EXPIRED = True      # enumerate + fetch recently-expired contracts for history
 IB_HOST = '127.0.0.1'
 IB_PORT = 4001
-DELAY = 2                   # seconds between contract fetches, to respect IB pacing
+DELAY = 2                   # seconds between contract fetches (hourly), to respect IB pacing
+BAR_SIZE = '1 hour'         # default timeframe to refresh
+
+# Sub-hourly per-contract backfill window (days). 1-minute history is enormous
+# and IB paces historical requests, so cap the per-contract window far below the
+# hourly LOOKBACK_DAYS (expired contracts are already time-bounded). Sizes absent
+# here use LOOKBACK_DAYS.
+SUBHOURLY_LOOKBACK_DAYS = {'1 min': 15, '5 mins': 45, '15 mins': 90, '30 mins': 120}
+SUBHOURLY_DELAY = 5         # seconds between sub-hourly contract fetches
+
+
+def _lookback_for(bar_size):
+    """Per-contract backfill window (days) for a contract with no stored bars."""
+    return SUBHOURLY_LOOKBACK_DAYS.get(bar_size, LOOKBACK_DAYS)
 
 
 def _tomorrow(now=None):
@@ -62,15 +75,15 @@ def _tomorrow(now=None):
     return (now + timedelta(days=1)).date()
 
 
-def _last_bars(conn, stock_ids):
-    """``{stock_id: last hourly timestamp}`` for the given contracts (None if empty)."""
+def _last_bars(conn, stock_ids, bar_size='1 hour'):
+    """``{stock_id: last timestamp at bar_size}`` for the given contracts (None if empty)."""
     if not stock_ids:
         return {}
     with conn.cursor() as cur:
         cur.execute(
-            """SELECT stock_id, MAX(timestamp) FROM price_hourly
-               WHERE stock_id = ANY(%s) GROUP BY stock_id""",
-            (list(stock_ids),),
+            """SELECT stock_id, MAX(timestamp) FROM price_bars
+               WHERE stock_id = ANY(%s) AND bar_size = %s GROUP BY stock_id""",
+            (list(stock_ids), bar_size),
         )
         return {row[0]: row[1] for row in cur.fetchall()}
 
@@ -89,10 +102,12 @@ def _fetch_window(expiry, last_ts, tomorrow, lookback_days):
     return start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')
 
 
-def _refresh_root(fetcher, conn, root, exchange, currency, tomorrow):
+def _refresh_root(fetcher, conn, root, exchange, currency, tomorrow, bar_size='1 hour'):
     """Register, fetch the front + priors, and rebuild the continuous series for one root."""
     root = root.upper()
-    print(f"\n=== {root} ===")
+    print(f"\n=== {root} [{bar_size}] ===")
+    lookback = _lookback_for(bar_size)
+    delay = DELAY if bar_size == '1 hour' else SUBHOURLY_DELAY
 
     # 1. Register the term structure (incl. recently-expired for history).
     registered = fetcher.register_futures_term_structure(
@@ -114,13 +129,13 @@ def _refresh_root(fetcher, conn, root, exchange, currency, tomorrow):
     selectable = [c for c in children if futures._as_date(c[2]) is not None
                   and futures._as_date(c[2]) <= front_expiry]
     selected = selectable[-(HISTORY_CONTRACTS + 1):]             # front + N priors
-    last_bars = _last_bars(conn, [c[0] for c in selected])
+    last_bars = _last_bars(conn, [c[0] for c in selected], bar_size=bar_size)
 
     # 3. Fetch each selected contract incrementally.
     fetched = []
     for i, (sid, sym, expiry, _mult, _conid) in enumerate(selected, start=1):
         exp = futures._as_date(expiry)
-        window = _fetch_window(exp, last_bars.get(sid), tomorrow, LOOKBACK_DAYS)
+        window = _fetch_window(exp, last_bars.get(sid), tomorrow, lookback)
         if window is None:
             print(f"  [{i}/{len(selected)}] {sym}: up to date")
             fetched.append((sym, 'current', 0))
@@ -130,14 +145,21 @@ def _refresh_root(fetcher, conn, root, exchange, currency, tomorrow):
         df = fetcher.get_futures_hourly_bars(
             root, exp.strftime('%Y%m%d'), exchange, currency=currency,
             start_date=start, end_date=end, include_expired=INCLUDE_EXPIRED,
+            bar_size=bar_size,
         )
         n = 0 if df is None else len(df)
         fetched.append((sym, 'ok' if n else 'empty', n))
         print(f"      {n} bars")
         if i < len(selected):
-            time.sleep(DELAY)
+            time.sleep(delay)
 
-    # 4. Rebuild the continuous series from whatever contracts now have candles.
+    # 4. Rebuild the continuous series (hourly only). The volume-roll / back-
+    #    adjustment builder operates on the hourly contract bars; a sub-hourly
+    #    continuous series is a separate, deferred feature, so skip the rebuild
+    #    for non-hourly refreshes (the raw contract bars are still stored).
+    if bar_size != '1 hour':
+        print(f"  [{root}] continuous: skipped (sub-hourly series not built yet)")
+        return {'registered': len(registered), 'fetched': fetched, 'continuous': None}
     cont = build_and_store_continuous(conn, root)
     if cont is None:
         print(f"  [{root}] continuous: nothing to build")
@@ -149,8 +171,13 @@ def _refresh_root(fetcher, conn, root, exchange, currency, tomorrow):
     return {'registered': len(registered), 'fetched': fetched, 'continuous': cont}
 
 
-def main(roots=ROOTS, exchange=EXCHANGE, currency=CURRENCY):
-    """Refresh futures data and rebuild the continuous series for each root."""
+def main(roots=ROOTS, exchange=EXCHANGE, currency=CURRENCY, bar_size=BAR_SIZE):
+    """Refresh futures data and rebuild the continuous series for each root.
+
+    ``bar_size`` defaults to ``'1 hour'``. Sub-hourly refreshes fetch the raw
+    contract bars at that size (bounded per-contract window) but **skip** the
+    continuous-series rebuild — that remains an hourly feature for now.
+    """
     db_config = get_db_config()
     tomorrow = _tomorrow()
 
@@ -158,7 +185,8 @@ def main(roots=ROOTS, exchange=EXCHANGE, currency=CURRENCY):
     with IBStockDataFetcher(host=IB_HOST, port=IB_PORT, db_config=db_config) as fetcher:
         conn = fetcher.db_conn
         for root in roots:
-            out[root] = _refresh_root(fetcher, conn, root, exchange, currency, tomorrow)
+            out[root] = _refresh_root(fetcher, conn, root, exchange, currency,
+                                      tomorrow, bar_size=bar_size)
 
     # Summary
     print("\n=== summary ===")

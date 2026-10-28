@@ -1,12 +1,12 @@
 ---
 FileType: 🚥 Dev Item
 Type: Feature
-Status: Backlog
+Status: In Progress
 Priority: 🔴
 Bucket: core-components
 Cycle: "3"
 DependsOn: 
-StartDate: 
+StartDate: 2026-10-28
 EndDate: 
 tags: 
 ---
@@ -25,12 +25,12 @@ The pivotal decision for [[Configurable bar size (sub-hourly retrieval)]]: **how
 **Leaning (a):** one explicit, vendor-agnostic bars table. It fits the "timeframe explicit, resample on read" principle and avoids a table-per-timeframe sprawl. Confirm before building.
 
 # Development Plan
-- [ ] **Decide** between (a)/(b)/(c) above (this is the deliverable of this item).
-- [ ] Migration under `db/db_scripts/migrations/` implementing the choice; keep existing hourly rows (back-compat, likely a `price_hourly` view). Additive + idempotent, matching the futures-migration style.
-- [ ] Generalise `ohlcv_store`: `upsert_bars(conn, stock_id, bar_size, candles)` / `read_bars(conn, stock_id, bar_size, …)`; keep thin `*_hourly` wrappers defaulting `bar_size='1 hour'` for back-compat.
-- [ ] Thread `bar_size` through `_log_fetch` (`data_type` reflects the size).
-- [ ] Reflect in `db/init.sql` **or** explicitly defer to [[Reconcile DB schema - init migrations and scripts]] (note which).
-- [ ] Extend the `FakeDB` price model in `tests/conftest.py` to key on `(stock_id, timestamp, bar_size)`.
+- [x] **Decide** between (a)/(b)/(c) above (this is the deliverable of this item). → **(a)** chosen (2026-10-28): one generalised `price_bars` table + a `price_hourly` back-compat view.
+- [x] Migration under `db/db_scripts/migrations/` implementing the choice; keep existing hourly rows (back-compat, likely a `price_hourly` view). Additive + idempotent, matching the futures-migration style. → `add_bar_size_support.sql`: renames `price_hourly`→`price_bars`, adds `bar_size` (default `'1 hour'`, backfills existing rows), swaps PK to `(stock_id, bar_size, timestamp)`, creates the `price_hourly` view. Idempotent (guarded rename); documented rollback. **Dry-run against prod (1.08M rows) applied + rolled back clean** — all rows preserved/backfilled, view intact, coexisting `'1 min'` bar proven. **NOT yet applied to prod**: must land with the code (current `main` fetchers write `price_hourly` directly and would break against the view) — apply at merge time.
+- [x] Generalise `ohlcv_store`: `upsert_bars(conn, stock_id, candles, bar_size='1 hour')` / `read_bars(conn, stock_id, bar_size='1 hour', …)`; keep thin `*_hourly` wrappers for back-compat. All existing write callers (ib_api, continuous) go through the wrappers unchanged.
+- [ ] Thread `bar_size` through `_log_fetch` (`data_type` reflects the size). → **deferred to [[Bar-size aware IB retrieval]]** (the fetch decides the size; `_log_fetch` lives in `ib_api` alongside it).
+- [x] Reflect in `db/init.sql` **or** explicitly defer to [[Reconcile DB schema - init migrations and scripts]] (note which). → **deferred** to the reconcile item, consistent with the futures migration (which also left `init.sql` untouched). The migration is the source of truth for now.
+- [x] Extend the `FakeDB` price model in `tests/conftest.py` to key on `(stock_id, timestamp, bar_size)`. → done; new `test_bar_sizes_coexist_at_same_instant` proves two sizes share an instant. Suite green (105 passed).
 
 # Dependencies
 ##### Depends on

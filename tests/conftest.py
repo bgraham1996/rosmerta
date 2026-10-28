@@ -50,9 +50,13 @@ class FakeCursor:
         elif "FROM stocks WHERE symbol" in s:
             symbol = params[0]
             self._result = [self._db.stocks.get(symbol)]  # (stock_id, name) or None
-        elif "FROM price_hourly" in s:
+        elif "FROM price_hourly" in s or "FROM price_bars" in s:
             stock_id = params[0]
-            self._result = list(self._db.prices.get(stock_id, []))
+            # ohlcv_store.read_bars filters by bar_size (params[1]); the
+            # price_hourly back-compat view and Asset's direct query are
+            # hourly-only, so default to '1 hour' when no bar_size is bound.
+            want = params[1] if "bar_size" in s else "1 hour"
+            self._result = self._db.read_prices(stock_id, want)
         elif "FROM dividends" in s:
             stock_id = params[0]
             self._result = list(self._db.dividends.get(stock_id, []))
@@ -99,7 +103,10 @@ class FakeDB:
     Attributes mirror the relevant tables:
 
     - ``stocks``: ``{symbol: (stock_id, name)}``
-    - ``prices``: ``{stock_id: [(stock_id, ts, open, high, low, close, volume), ...]}``
+    - ``prices``: ``{stock_id: [row, ...]}`` where a row is either a legacy
+      read-shape 7-tuple ``(stock_id, ts, o, h, l, c, v)`` (implicit hourly) or
+      an upserted 8-tuple ``(stock_id, ts, bar_size, o, h, l, c, v)``; read back
+      in 7-tuple shape via ``read_prices``.
     - ``dividends``: ``{stock_id: [(dividend_id, ex_date, pay_date, decl_date, type, amount), ...]}``
     - ``fundamentals``: ``{stock_id: [(fundamental_id, period_end, net_income), ...]}``
     - ``watchlists``: ``{list_name: [symbol, ...]}``
@@ -161,23 +168,44 @@ class FakeDB:
         return sorted(kids, key=lambda k: k[2])
 
     def apply_price_upsert(self, records):
-        """Model ``price_hourly`` ON CONFLICT (stock_id, timestamp) last-wins.
+        """Model ``price_bars`` ON CONFLICT (stock_id, bar_size, timestamp) last-wins.
 
         Bound to ``ohlcv_store._execute_values`` via monkeypatch in tests so the
-        real ``upsert_hourly_bars`` writes here instead of PostgreSQL. ``records``
-        are ``(stock_id, ts, o, h, l, c, v)`` tuples.
+        real ``upsert_bars`` writes here instead of PostgreSQL. ``records`` are
+        ``(stock_id, ts, bar_size, o, h, l, c, v)`` tuples (the INSERT column
+        order). Stored as-is so a bar's timeframe is retained; the same instant
+        may hold two sizes without colliding.
         """
         for rec in records:
-            stock_id, ts = rec[0], rec[1]
-            bucket = self.prices.setdefault(stock_id, [])
-            # replace any existing row for this (stock_id, ts)
+            # rec = (stock_id, ts, bar_size, o, h, l, c, v)
+            ts, bar_size = rec[1], rec[2]
+            bucket = self.prices.setdefault(rec[0], [])
+            # replace any existing row for this (ts, bar_size); a legacy 7-tuple
+            # seed (no bar_size) is treated as implicit '1 hour'.
             for i, existing in enumerate(bucket):
-                if existing[1] == ts:
+                ex_size = existing[2] if len(existing) == 8 else "1 hour"
+                if existing[1] == ts and ex_size == bar_size:
                     bucket[i] = rec
                     break
             else:
                 bucket.append(rec)
             bucket.sort(key=lambda r: r[1])
+
+    def read_prices(self, stock_id, bar_size):
+        """Rows for ``stock_id`` at ``bar_size`` in ``read_bars`` output shape
+        ``(stock_id, ts, o, h, l, c, v)`` — ``bar_size`` filtered out, not emitted.
+
+        Handles both upserted 8-tuples (carry their bar_size) and legacy
+        7-tuple seeds (``sample_prices``), which count as ``'1 hour'``.
+        """
+        out = []
+        for row in self.prices.get(stock_id, []):
+            if len(row) == 8:  # (stock_id, ts, bar_size, o, h, l, c, v)
+                if row[2] == bar_size:
+                    out.append((row[0], row[1], row[3], row[4], row[5], row[6], row[7]))
+            elif bar_size == "1 hour":  # legacy seed == implicit hourly
+                out.append(row)
+        return out
 
 
 @pytest.fixture

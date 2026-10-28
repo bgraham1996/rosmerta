@@ -19,17 +19,31 @@ OHLCV_AGG = {
     "volume": "sum",
 }
 
-# Pandas resample rules for each supported coarser timeframe.
-# 'B'     — business day (skips weekends)
-# 'W-FRI' — week ending Friday (aligns to trading-week close)
-# 'BME'   — business month end (last trading day of the month)
+# Analysis timeframes that correspond directly to a stored ``price_bars``
+# ``bar_size`` (the IB barSizeSetting string). Under "read-what-you-ask"
+# (board item "Bar size in the analysis layer") these are read straight from
+# the DB at that granularity — no resampling. Both ``'1min'`` and ``'minute'``
+# are accepted spellings for 1-minute.
+TIMEFRAME_BAR_SIZE = {
+    "1min":   "1 min",
+    "minute": "1 min",
+    "5min":   "5 mins",
+    "15min":  "15 mins",
+    "30min":  "30 mins",
+    "hourly": "1 hour",
+}
+
+# Pandas resample rules for each supported coarser (calendar) timeframe.
+# These are resampled UP from the hourly base, as the analysis layer always
+# has. 'B' — business day; 'W-FRI' — week ending Friday; 'BME' — business
+# month end.
 RESAMPLE_RULES = {
     "daily":   "B",
     "weekly":  "W-FRI",
     "monthly": "BME",
 }
 
-VALID_TIMEFRAMES = {"hourly"} | set(RESAMPLE_RULES.keys())
+VALID_TIMEFRAMES = set(TIMEFRAME_BAR_SIZE) | set(RESAMPLE_RULES)
 
 
 def resample_ohlcv(df: DataFrame, rule: str) -> DataFrame:

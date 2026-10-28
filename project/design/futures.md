@@ -157,11 +157,19 @@ uv run main.py futures register ES --exchange CME        # enumerate + register 
 uv run main.py futures list ES                           # list contracts, mark the front (no IB)
 uv run main.py futures fetch ES                          # fetch the front-month contract
 uv run main.py futures fetch ES --expiry 20261218 -s 2026-10-01 -e 2026-10-20
+uv run main.py futures fetch ES --expiry 20261218 -s 2026-10-20 -e 2026-10-24 --bar-size '1 min'
 uv run main.py futures continuous ES                     # build + store ES.c1 (prints the roll schedule)
 ```
 
 `futures fetch` defaults to the front month (needs the DB; `--no-db` therefore requires `--expiry`).
 `futures continuous` builds from contracts already in the DB — fetch first (or use the workflow).
+
+**Bar size.** `--bar-size` (default `'1 hour'`; also `'1 min'`/`'5 mins'`/`'15 mins'`/`'30 mins'`) applies
+to `fetch price`, `futures fetch`, and `bulk price`. Sub-hourly over a long range issues many IB
+historical requests (IB paces them hard), so keep the window tight. The `update_futures` workflow accepts
+`main(bar_size='1 min')` and fetches the raw contract bars at that size, but **skips** the continuous-series
+rebuild for sub-hourly (that stays an hourly feature); `update_core` accepts `main(bar_size='1 min')` and
+backfills only a bounded recent window for a contract/ticker with no bars of that size yet.
 
 ## Key files
 
