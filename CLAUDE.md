@@ -79,12 +79,16 @@ commands consistent with this lazy-import + Rich-output style.
 - `ib_api.py` — `IBStockDataFetcher` context manager; hourly bars in ≤30-day chunks. Its
   `_save_bars_to_db` is now a thin IB adapter that converts the ib-insync DataFrame to candle
   tuples and delegates the upsert to `ohlcv_store.upsert_hourly_bars` (one shared write path).
-- `ohlcv_store.py` — **source-agnostic** OHLCV candle store, decoupled from any vendor.
-  `upsert_hourly_bars(conn, stock_id, candles)` upserts `(ts, o, h, l, c, v)` tuples into
-  `price_hourly` (same `ON CONFLICT (stock_id, timestamp)` upsert; de-dups a batch last-wins);
-  `read_hourly_bars(conn, stock_id, start, end)` reads them back in `Asset`'s column order. Any
-  source (IB, synthetic, third-party) writes candles through here. The `_execute_values` module
-  symbol is the test seam (monkeypatched to model ON CONFLICT against the FakeDB).
+- `ohlcv_store.py` — **source-agnostic, bar-size-aware** OHLCV candle store, decoupled from any
+  vendor. The general path is `upsert_bars(conn, stock_id, candles, bar_size='1 hour')` /
+  `read_bars(conn, stock_id, bar_size='1 hour', start, end)`: candles `(ts, o, h, l, c, v)` tuples
+  are written into the generalised `price_bars` table keyed by `(stock_id, bar_size, timestamp)`
+  (`ON CONFLICT` upsert; de-dups a batch last-wins), and `bar_size` is the IB `barSizeSetting`
+  string (`'1 hour'`, `'1 min'`, `'5 mins'`, …) so multiple timeframes coexist for one stock.
+  `upsert_hourly_bars` / `read_hourly_bars` are thin `bar_size='1 hour'` wrappers kept for
+  back-compat. Any source (IB, synthetic, third-party) writes candles through here. The
+  `_execute_values` module symbol is the test seam (monkeypatched to model ON CONFLICT against
+  the FakeDB).
 - `futures.py` — futures registry & navigation for the "contracts-as-stocks" model.
   `get_or_create_root` / `register_contract` idempotently upsert a root (`sec_type='FUTROOT'`) and
   its contracts (`sec_type='FUT'`, `parent_stock_id` → root) via `ON CONFLICT (symbol)`, storing
@@ -136,10 +140,16 @@ the package is what triggers registration). `theme.py`, `figures/` (Plotly figur
 
 ### Database
 
-- `db/init.sql` is the canonical schema: `stocks`, `price_hourly`, `dividends`, `fundamentals`,
-  `stock_tags`, `fetch_log`, plus views `v_active_tags` / `v_latest_fundamentals`. Watchlists are
-  modeled via `watchlist_members(list_name, stock_id)` joined to `stocks` (see `Market` and
-  `bulk_fetch`).
+- `db/init.sql` is the canonical schema: `stocks`, `price_bars`, `dividends`, `fundamentals`,
+  `stock_tags`, `fetch_log`, plus views `v_active_tags` / `v_latest_fundamentals` and a
+  `price_hourly` back-compat view (hourly rows of `price_bars`; writes go to `price_bars`
+  directly). Watchlists are modeled via `watchlist_members(list_name, stock_id)` joined to
+  `stocks` (see `Market` and `bulk_fetch`). The **bar-size storage model is reconciled into
+  `init.sql`**: migration `migrations/add_bar_size_support.sql` renamed the old `price_hourly`
+  base table to `price_bars`, added a `bar_size VARCHAR(16) NOT NULL DEFAULT '1 hour'` column,
+  and moved the PK to `(stock_id, bar_size, timestamp)` (bar_size first, so the PK index serves
+  the size-scoped range read) — `init.sql` now creates that end state directly, so a fresh init
+  matches a migrated DB.
 - `db_scripts/` — operational SQL: `seed_dev.sql`, `core_expansion_seed.sql`, exports, audits,
   and `migrations/` (apply migrations there as the schema evolves).
 - `db_exports/` — generated CSVs (gitignored).
@@ -147,9 +157,11 @@ the package is what triggers registration). `theme.py`, `figures/` (Plotly figur
   `db_scripts/migrations/add_futures_contract_support.sql`): a self-FK `parent_stock_id` links a
   contract to its root, and `sec_type` (`STK`/`FUTROOT`/`FUT`), `expiry`, `multiplier` describe
   it. Each contract (`ESZ26`) and its root (`ES`) are ordinary `stocks` rows with distinct symbols
-  (no clash with `UNIQUE(symbol)`); a contract's candles are just `price_hourly` rows — no new
-  price table. `init.sql` is not yet updated for this (deferred to the schema-reconciliation work);
-  the migration is the source of truth for now.
+  (no clash with `UNIQUE(symbol)`); a contract's candles are just `price_bars` rows — no new
+  price table. **The futures contracts-as-stocks columns (`parent_stock_id`, `sec_type`,
+  `expiry`, `multiplier`) are not yet in `init.sql`** (still deferred to the schema-reconciliation
+  work — only the `price_bars`/`bar_size` part has been reconciled so far); the migration remains
+  the source of truth for the futures columns.
 
 ## Tests
 
