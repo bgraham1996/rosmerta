@@ -26,6 +26,8 @@ series is a derived, rebuildable artefact.
 
 from datetime import datetime, timezone
 
+from price_retrival import ohlcv_store
+
 
 def _daily_volume(candles):
     """Map each bar's date → that day's total volume."""
@@ -121,16 +123,20 @@ def build_continuous(contracts):
             'factors': {c['symbol']: factors[i] for i, c in enumerate(contracts)}}
 
 
-def build_and_store_continuous(conn, root, series_symbol=None, as_of=None):
+def build_and_store_continuous(conn, root, series_symbol=None, as_of=None,
+                               bar_size=ohlcv_store._HOURLY):
     """Read a root's raw contracts, build the continuous series, and persist it
     as a ``CONTFUT`` child row (default symbol ``<root>.c1``).
 
     Includes only contracts that have candles and whose expiry is on/before the
     current front month (``futures.get_front_contract``) — future, not-yet-active
-    contracts are excluded. Returns a summary dict (``symbol, stock_id, bars,
-    rolls, factors``) or ``None`` if there is nothing to build.
+    contracts are excluded. ``bar_size`` selects the timeframe to splice: raw
+    contracts are read at that size from ``price_bars`` and the result is stored
+    back at the same size (so a root can carry an hourly *and* a 1-min continuous
+    series side by side). Returns a summary dict (``symbol, stock_id, bars,
+    rolls, factors, bar_size``) or ``None`` if there is nothing to build.
     """
-    from price_retrival import futures, ohlcv_store
+    from price_retrival import futures
 
     front = futures.get_front_contract(conn, root, as_of=as_of)
     if front is None:
@@ -142,7 +148,7 @@ def build_and_store_continuous(conn, root, series_symbol=None, as_of=None):
         ed = futures._as_date(expiry)
         if ed is None or (front_expiry is not None and ed > front_expiry):
             continue
-        rows = ohlcv_store.read_hourly_bars(conn, sid)
+        rows = ohlcv_store.read_bars(conn, sid, bar_size=bar_size)
         if not rows:
             continue
         candles = [(r[1], float(r[2]), float(r[3]), float(r[4]), float(r[5]), int(r[6]))
@@ -155,7 +161,7 @@ def build_and_store_continuous(conn, root, series_symbol=None, as_of=None):
     result = build_continuous(contracts)
     symbol = series_symbol or f"{root}.c1"
     cont_id = futures.register_continuous(conn, root, symbol)
-    n = ohlcv_store.upsert_hourly_bars(conn, cont_id, result['candles'])
+    n = ohlcv_store.upsert_bars(conn, cont_id, result['candles'], bar_size=bar_size)
     return {'symbol': symbol, 'stock_id': cont_id, 'bars': n,
             'rolls': result['rolls'], 'factors': result['factors'],
-            'contracts': [c['symbol'] for c in contracts]}
+            'bar_size': bar_size, 'contracts': [c['symbol'] for c in contracts]}

@@ -680,24 +680,31 @@ def futures_fetch(root, expiry, exchange, currency, start, end, bar_size, no_db)
 @click.argument('root')
 @click.option('--symbol', default=None,
               help='Continuous series symbol (default: <ROOT>.c1)')
-def futures_continuous(root, symbol):
+@click.option('--bar-size', default='1 hour', type=click.Choice(BAR_SIZES),
+              help='Bar size / timeframe to splice (default: 1 hour). Must match '
+                   'the size the contracts were fetched at.')
+def futures_continuous(root, symbol, bar_size):
     """Build + store a root's continuous series from its registered contracts.
 
     Splices the root's contracts (already fetched into the DB) into one gap-free
     series using a volume roll + ratio back-adjustment, stored as a CONTFUT child
-    (e.g. ES.c1). Fetch the contracts first with `futures fetch`. No IB call.
+    (e.g. ES.c1). The series is built at --bar-size, reading and writing the
+    bar-size-aware price_bars table, so a root can carry an hourly and a 1-min
+    continuous side by side. Fetch the contracts first with `futures fetch`
+    (at the matching --bar-size). No IB call.
 
     Example: rosmerta futures continuous ES
+    Example: rosmerta futures continuous ES --bar-size '1 min'
     """
     import psycopg2
     from price_retrival.continuous import build_and_store_continuous
 
     root = root.upper()
-    console.print(f"[cyan]Building continuous series for {root}[/cyan] (volume roll + ratio adjust)…")
+    console.print(f"[cyan]Building {bar_size} continuous series for {root}[/cyan] (volume roll + ratio adjust)…")
 
     conn = psycopg2.connect(**get_db_config())
     try:
-        result = build_and_store_continuous(conn, root, series_symbol=symbol)
+        result = build_and_store_continuous(conn, root, series_symbol=symbol, bar_size=bar_size)
     finally:
         conn.close()
 
