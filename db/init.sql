@@ -21,7 +21,15 @@ CREATE INDEX idx_stocks_symbol on stocks (symbol);
 CREATE INDEX idx_stocks_exchange on stocks (exchange);
 CREATE INDEX idx_stocks_country on stocks (country);
 
-CREATE TABLE price_hourly (
+-- OHLCV candles at an explicit timeframe. Generalised from the original
+-- price_hourly table (migration add_bar_size_support.sql): bar_size is part
+-- of the row identity, so a 1-minute and an hourly bar at the same instant
+-- coexist instead of colliding. bar_size is the IB barSizeSetting string
+-- ('1 hour', '1 min', '5 mins', '15 mins', ...); '1 hour' is the default so
+-- legacy hourly inserts need no change. PK puts bar_size before timestamp so
+-- the PK index directly serves the dominant size-scoped range read
+-- (read_bars(stock_id, bar_size, start, end)).
+CREATE TABLE price_bars (
   stock_id INTEGER NOT NULL REFERENCES stocks(stock_id),
   timestamp TIMESTAMPTZ NOT NULL,
   open NUMERIC(12,4) NOT NULL,
@@ -29,11 +37,28 @@ CREATE TABLE price_hourly (
   low  NUMERIC(12,4) NOT NULL,
   close  NUMERIC(12,4) NOT NULL,
   volume BIGINT NOT NULL,
+  bar_size VARCHAR(16) NOT NULL DEFAULT '1 hour',
 
-  PRIMARY KEY (stock_id, timestamp)
+  PRIMARY KEY (stock_id, bar_size, timestamp)
 );
 
-CREATE INDEX idx_price_hourly_ts ON price_hourly (timestamp);
+CREATE INDEX idx_price_bars_ts ON price_bars (timestamp);
+
+COMMENT ON TABLE price_bars IS
+    'OHLCV candles at an explicit timeframe. One row per (stock_id, bar_size, timestamp). bar_size is the IB barSizeSetting string.';
+COMMENT ON COLUMN price_bars.bar_size IS
+    'Timeframe as an IB barSizeSetting string: ''1 hour'' (default/legacy), ''1 min'', ''5 mins'', ''15 mins'', ...';
+
+-- Read back-compat: a view that looks exactly like the old price_hourly table
+-- (hourly rows, no bar_size column). Writes go to price_bars directly
+-- (INSERT ... ON CONFLICT is unsupported through a view).
+CREATE VIEW price_hourly AS
+    SELECT stock_id, timestamp, open, high, low, close, volume
+    FROM price_bars
+    WHERE bar_size = '1 hour';
+
+COMMENT ON VIEW price_hourly IS
+    'Read back-compat view: hourly rows of price_bars. Writes go to price_bars directly (ON CONFLICT is unsupported through a view).';
 
 CREATE TABLE dividends (
   dividend_id SERIAL PRIMARY KEY, 
