@@ -2,10 +2,22 @@
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- `stocks` holds equities AND futures under the "contracts-as-stocks" model
+-- (migrations dedupe_stocks_symbol_exchange.sql, add_futures_contract_support.sql,
+-- add_contfut_sec_type.sql, reconciled here so a fresh init matches a migrated DB):
+--   * sec_type distinguishes the row kind — STK (equity) | FUTROOT (futures root,
+--     an organizing parent) | FUT (a specific contract, e.g. ESZ26) | CONTFUT (a
+--     derived continuous series, e.g. ES.c1).
+--   * parent_stock_id is a self-FK: a FUT/CONTFUT row points at its FUTROOT row;
+--     equities and roots stay NULL.
+--   * expiry/multiplier describe a contract; NULL for equities and roots.
+-- UNIQUE is on symbol alone (not symbol+exchange): every contract carries a
+-- distinct normalised symbol (ESZ26 != ESU26 != ES), and futures registration
+-- upserts via ON CONFLICT (symbol).
 CREATE TABLE stocks (
   stock_id SERIAL PRIMARY KEY,
   symbol VARCHAR(20) NOT NULL,
-  name VARCHAR(255) NOT NULL, 
+  name VARCHAR(255) NOT NULL,
   exchange VARCHAR(50) NOT NULL,
   currency VARCHAR(3) NOT NULL,
   ib_con_id INTEGER,
@@ -13,13 +25,28 @@ CREATE TABLE stocks (
   is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
+  parent_stock_id INTEGER REFERENCES stocks(stock_id),
+  sec_type VARCHAR(10) NOT NULL DEFAULT 'STK',
+  expiry DATE,
+  multiplier NUMERIC(20,4),
 
-  CONSTRAINT uq_symbol_exchange UNIQUE (symbol, exchange)
+  CONSTRAINT uq_stocks_symbol UNIQUE (symbol),
+  CONSTRAINT ck_stocks_sec_type CHECK (sec_type IN ('STK', 'FUTROOT', 'FUT', 'CONTFUT'))
 );
 
 CREATE INDEX idx_stocks_symbol on stocks (symbol);
 CREATE INDEX idx_stocks_exchange on stocks (exchange);
 CREATE INDEX idx_stocks_country on stocks (country);
+CREATE INDEX idx_stocks_parent_stock_id on stocks (parent_stock_id);
+
+COMMENT ON COLUMN stocks.parent_stock_id IS
+    'Self-FK: a FUT/CONTFUT row points at its FUTROOT row. NULL for equities and roots.';
+COMMENT ON COLUMN stocks.sec_type IS
+    'Row kind: STK (equity), FUTROOT (futures root/organizing parent), FUT (specific futures contract), CONTFUT (derived continuous series).';
+COMMENT ON COLUMN stocks.expiry IS
+    'Futures contract expiry (IB lastTradeDateOrContractMonth) as a DATE. NULL for STK/FUTROOT.';
+COMMENT ON COLUMN stocks.multiplier IS
+    'Futures contract multiplier (e.g. ES=50). NULL for STK/FUTROOT.';
 
 -- OHLCV candles at an explicit timeframe. Generalised from the original
 -- price_hourly table (migration add_bar_size_support.sql): bar_size is part
