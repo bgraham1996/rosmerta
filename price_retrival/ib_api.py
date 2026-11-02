@@ -353,8 +353,17 @@ class IBStockDataFetcher:
                     # Move the window back one bar past the earliest we received.
                     current_end = bars[0].date.replace(tzinfo=None) - step
                 else:
-                    self.logger.warning(f"No data for period ending {current_end}")
-                    break
+                    # Don't truncate the backfill on an empty chunk (a holiday, or
+                    # an IB "no data" response for a window ending mid-session):
+                    # step the window back one full chunk and keep going toward
+                    # start_date instead of breaking. Mirrors the futures path.
+                    self.logger.warning(
+                        f"No data for period ending {current_end}; "
+                        f"stepping back {request_days}d and continuing"
+                    )
+                    current_end = current_end - timedelta(days=request_days)
+                    self.ib.sleep(1)
+                    continue
 
                 # Rate-limit courtesy
                 self.ib.sleep(1)
@@ -510,8 +519,19 @@ class IBStockDataFetcher:
                     all_bars.extend(bars)
                     current_end = self._to_utc(bars[0].date) - step
                 else:
-                    self.logger.warning(f"No data for period ending {current_end}")
-                    break
+                    # An empty chunk is not the end of history: a holiday — or IB
+                    # answering "no data" (error 162) for a window ending
+                    # mid-session — used to `break` and silently truncate the whole
+                    # backfill at the first such day. Instead step the window back
+                    # one full chunk and keep going toward start_dt, so one no-data
+                    # day no longer drops every older bar.
+                    self.logger.warning(
+                        f"No data for period ending {current_end}; "
+                        f"stepping back {request_days}d and continuing"
+                    )
+                    current_end = current_end - timedelta(days=request_days)
+                    self.ib.sleep(1)
+                    continue
                 self.ib.sleep(1)
 
             if not all_bars:
