@@ -5,7 +5,7 @@ Version: "[[V1002]]"
 Priority: 🔴
 Status: 🟢 Active
 Dev Status:
-DevStatus: Planned
+DevStatus: In Progress
 Cycle: "3"
 ReviewCount: "0"
 ---
@@ -17,7 +17,8 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 1. **Prove the system still hangs together** after the `price_bars` migration — full sanity check + test audit.
 2. **Make a fresh DB buildable** — finish reconciling `init.sql` with the live schema.
 3. **Clear the oldest tech debt** — the rescoped directory reorg; incremental fetch on the remaining paths.
-4. **Ship portfolio analytics** — the headline [[V1001]] objective that didn't make it.
+4. **Ship portfolio analytics** — the headline [[V1001]] objective that didn't make it (on correctly-timestamped trades).
+5. **Land the in-flight Cycle 2 work** — review + merge draft PRs #11 and #13.
 
 # Cycle Metadata
 
@@ -27,16 +28,20 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 
 # Dev Items in Cycle
 
-## Planned:
-- [ ] [[Full codebase sanity check and test audit]] 🔴 — do first; may spawn fix items.
-- [ ] [[Reconcile DB schema - init migrations and scripts]] 🟡 — in progress (draft PR #12 covers the futures columns).
-- [ ] [[Finish Directory Reorg]] 🔴 — now just `data-models/` vs `data_models.py` + the `time-periods.py` syntax error.
-- [ ] [[Incremental Fetch and Dedup]] 🔴 — price path already incremental in the workflows; remaining: CLI paths, fundamentals skip, `fetch_log`, ticker dedupe.
-- [ ] [[Trades and Portfolio Analytics]] 🟡 — carried from [[Cycle 1]].
+> [!info] Started 2026-11-11 — items assigned, nothing being built yet. Suggested order: land the drafts → sanity check → schema → reorg / incremental fetch → TZ fix → portfolio analytics.
 
-## In flight from Cycle 2 (draft PRs — review/merge during this cycle):
-- #11 fix: don't truncate IB backfill on an empty chunk
-- #12 `init.sql` stocks table ↔ futures schema (part of the reconcile item)
-- #13 futures viewable in the dashboard asset deep-dive
+## Land in-flight work (built in Cycle 2, needs review + merge):
+- [ ] [[IB backfill truncation on empty chunk]] 🟡 — draft PR #11.
+- [ ] [[Futures in the dashboard]] 🟡 — draft PR #13.
+- [ ] [[Reconcile DB schema - init migrations and scripts]] 🟡 — in progress; draft PR #12 covers the futures columns, rest of `init.sql` still to do.
+
+## Consolidate:
+- [ ] [[Full codebase sanity check and test audit]] 🔴 — may spawn fix items.
+- [ ] [[Finish Directory Reorg]] 🔴 — `data-models/` vs `data_models.py` + the `time-periods.py` syntax error.
+- [ ] [[Incremental Fetch and Dedup]] 🔴 — CLI paths, fundamentals skip, `fetch_log`, ticker dedupe.
+
+## Portfolio:
+- [ ] [[Flex Trade Timezone Fix]] 🟢 — prerequisite for the analytics.
+- [ ] [[Trades and Portfolio Analytics]] 🟡 — carried from [[Cycle 1]].
 
 ## Done:
