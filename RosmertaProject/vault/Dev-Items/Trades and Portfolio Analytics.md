@@ -5,7 +5,7 @@ Status: Planned
 Priority: 🟡
 Bucket: portfolio
 Cycle: "3"
-DependsOn: Flex trades ingest (done)
+DependsOn: Flex Trade Timezone Fix
 StartDate: 
 EndDate: 
 tags: 

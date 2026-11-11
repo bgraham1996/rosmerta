@@ -1,15 +1,16 @@
 ---
 FileType: 🚥 Dev Item
 Type: Tech-Debt
-Status: Backlog
+Status: Planned
 Priority: 🟢
 Bucket: data-quality
-Cycle:
+Cycle: "3"
 DependsOn: Flex trades ingest (done)
 StartDate: 
 EndDate: 
 tags: 
 ---
+> [!info] Scheduled into [[Cycle 3]] (2026-11-11) — do before [[Trades and Portfolio Analytics]] so P&L / holding periods are built on correct execution times.
 
 # Summary (Tech Debt)
 IB Flex `dateTime` values (e.g. `20260529;095303`) are parsed **naive** and stored into `trade.trade_datetime` (`TIMESTAMPTZ`), so PostgreSQL stamps them with the session timezone (observed **+01 BST**). Result: `trade_datetime` is offset by the local UTC offset instead of reflecting the true execution time.
