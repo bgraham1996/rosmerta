@@ -4,7 +4,7 @@ Type: Chore
 Status: Backlog
 Priority: 🟢
 Bucket: tech-debt
-Cycle: "2"
+Cycle:
 DependsOn: 
 StartDate: 
 EndDate: 

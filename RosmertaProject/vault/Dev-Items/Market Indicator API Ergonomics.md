@@ -4,12 +4,14 @@ Type: Enhancement
 Status: Backlog
 Priority: 🟡
 Bucket: analysis
-Cycle: "2"
+Cycle:
 DependsOn: 
 StartDate: 
 EndDate: 
 tags: 
 ---
+> [!info] Checked 2026-11-11 — **not done.** The workflow call sites now use the correct `add_indicators(conn, indicator, source=...)` order (`stats.py`, `daily_ema_fan.py`, `vwap_fan.py`), and `Market.get_indicator_panel` exists (`64703ef`), but the batch helpers and construction-time param validation below have not been built.
+
 # Summary
 The real workflow scripts under `workflows/` expose friction in the `Market`/`Indicator` API. In `macro_stats/stats.py` the author hand-writes **20** near-identical `Indicator('days_offset_gain', days=N)` + `add_indicators(...)` pairs; and both `stats.py` and `basic_feature_generation/daily_ema_fan.py` call `add_indicators` with the **wrong argument order / shape** (`add_indicators(indicator, conn)` and `add_indicators(conn, 'ema', [9])` vs the real `add_indicators(self, conn, indicator, source='close')`). When even the author calls it wrong, the API needs smoothing. Also: `Indicator(name, **params)` doesn't validate params, and `days_offset_gain`'s param is `days_ahead` (not `days`) — passing `days=5` fails only later at `compute`.
 

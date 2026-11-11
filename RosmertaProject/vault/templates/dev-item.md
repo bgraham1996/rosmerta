@@ -4,7 +4,7 @@ Type: Feature
 Status: Backlog
 Priority: 🟡
 Bucket: 
-Cycle: "2"
+Cycle: 
 DependsOn: 
 StartDate: 
 EndDate: 
@@ -15,7 +15,7 @@ tags:
 > **Status** — `Backlog` → `Planned` → `In Progress` → `Blocked` → `Done` (or `Won't Do`).
 > **Priority** — 🔴 high · 🟡 medium · 🟢 low.
 > **Bucket** — area of the codebase, e.g. `indicators` · `portfolio` · `analysis` · `data-quality` · `docs` · `tech-debt` · `dashboards`.
-> **Cycle** — release/version this is slated for (V1 work = `"1"`, next version = `"2"`).
+> **Cycle** — the number of the `cycles/Cycle N` note this item is scheduled into (or was delivered in), e.g. `"3"`. **Leave blank for unscheduled backlog** — only put a number here when the item is actually listed in that cycle note. Epics stay blank; their children carry the cycle. Versions are tracked on the cycle note, not here.
 
 # Summary
 *What is this, and why does it matter? One or two sentences. For Tech-Debt, describe what's wrong today and the cost of leaving it.*

@@ -4,7 +4,7 @@ Type: Tech-Debt
 Status: Done
 Priority: 🟡
 Bucket: indicators
-Cycle: "2"
+Cycle: "1"
 DependsOn: 
 StartDate: 
 EndDate: 2026-09-20

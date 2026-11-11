@@ -1,13 +1,13 @@
 ---
 FileType: 🚥 Dev Item
 Type: Feature
-Status: In Progress
+Status: Done
 Priority: 🟡
 Bucket: analysis
-Cycle: "3"
+Cycle: "2"
 DependsOn: Bar-size storage model
 StartDate: 2026-10-28
-EndDate: 
+EndDate: 2026-10-28
 tags: 
 ---
 # Summary

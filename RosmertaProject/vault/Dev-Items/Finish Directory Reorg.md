@@ -1,15 +1,17 @@
 ---
 FileType: 🚥 Dev Item
 Type: Tech-Debt
-Status: Backlog
+Status: Planned
 Priority: 🔴
 Bucket: tech-debt
-Cycle: "1"
+Cycle: "3"
 DependsOn: 
 StartDate: 
 EndDate: 
 tags: 
 ---
+> [!info] Rescoped — 2026-11-11 (scheduled into [[Cycle 3]]). Most of this has already landed: the `db/` layout (`db/db_scripts/`, `db/scripts/`), the move to the `RosmertaProject/` vault, the `trades_api.py` + offset-growth commits, and the `.gitignore` tidy-up. **What remains:** decide `data-models/` vs the root `data_models.py` (one home for the analysis layer), and fix `data-models/time-periods.py` (`raise:` syntax error at line 46). Empty stub files are intentional placeholders — leave them.
+
 
 # Summary (Tech Debt)
 The working tree has a **half-finished reorganization**, all uncommitted, leaving the repo in a fragile checkpoint. Land it into clean commits before starting new feature work — the messy tree is part of what made the project hard to return to.

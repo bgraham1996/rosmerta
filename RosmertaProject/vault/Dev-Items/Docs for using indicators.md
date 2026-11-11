@@ -4,7 +4,7 @@ Type: Chore
 Status: Backlog
 Priority: 🟢
 Bucket: docs
-Cycle: "1"
+Cycle:
 DependsOn: 
 StartDate: 
 EndDate: 

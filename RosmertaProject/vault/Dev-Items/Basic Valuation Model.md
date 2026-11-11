@@ -4,7 +4,7 @@ Type: Feature
 Status: Backlog
 Priority: 🟡
 Bucket: analysis
-Cycle: "2"
+Cycle:
 DependsOn: Fundamentals Gap Detection
 StartDate: 
 EndDate: 

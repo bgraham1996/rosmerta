@@ -1,8 +1,8 @@
 {
-  "version":"1.0.0.0",
+  "version":"1.0.0.1",
   "version-manifest": {
-    "release-date": "30-08-2026",
-    "release-summary": "This is version 1 so it is mainly just getting the building blocks of the system set up",
+    "release-date": "31-10-2026",
+    "release-summary": "Futures (contracts-as-stocks, IB retrieval, continuous series) and configurable bar sizes (1-minute through hourly) end to end",
     "project-code": ""
   },
   "deployment-manifest": {

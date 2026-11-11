@@ -4,7 +4,7 @@ Type: Feature
 Status: Backlog
 Priority: 🟢
 Bucket: analysis
-Cycle: "3"
+Cycle:
 DependsOn: Feature Generation Workflow
 StartDate: 
 EndDate: 

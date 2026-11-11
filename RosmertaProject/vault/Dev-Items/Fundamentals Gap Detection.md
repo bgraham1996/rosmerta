@@ -4,7 +4,7 @@ Type: Enhancement
 Status: Backlog
 Priority: 🟡
 Bucket: data-quality
-Cycle: "2"
+Cycle:
 DependsOn: 
 StartDate: 
 EndDate: 

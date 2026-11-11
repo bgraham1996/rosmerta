@@ -1,5 +1,10 @@
 # Rosmerta — Next Steps & Planning
 
+> **⚠️ Superseded (2026-11-11) — historical snapshot only.** Planning now lives solely in the
+> `RosmertaProject/vault/` board: the current cycle is `cycles/Cycle 3.md` (target V1.0.0.2),
+> versions under `Versions/`, and the backlog at `Dashboards/Dev Items.md`. The "Cycle 1"
+> proposed below was superseded by the vault's Cycle 1/2. Do not update this file.
+
 _Last updated: 2026-08-01_
 
 A snapshot of where the project is and what to work on next. Companion to the

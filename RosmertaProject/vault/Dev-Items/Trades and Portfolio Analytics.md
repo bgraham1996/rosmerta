@@ -1,15 +1,17 @@
 ---
 FileType: 🚥 Dev Item
 Type: Feature
-Status: Backlog
+Status: Planned
 Priority: 🟡
 Bucket: portfolio
-Cycle: "1"
+Cycle: "3"
 DependsOn: Flex trades ingest (done)
 StartDate: 
 EndDate: 
 tags: 
 ---
+> [!info] Carried forward — headline [[V1001]] scope that didn't ship; scheduled into [[Cycle 3]] / [[V1002]]. Design: `project/design/portfolio-analytics.md`.
+
 
 # Feature Summary
 Now that executed trades land in `transaction` + `trade` (via `fetch trades`), build the **portfolio analytics layer**: realized/unrealized P&L, open positions, cost basis, holding periods, and per-trade outcomes. This is the payoff of the IB Flex work — turning raw executions into the position/performance picture the `position` table was designed for. Trader is **long-only** (buy then sell, never short), so position matching can assume that.
