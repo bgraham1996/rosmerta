@@ -4,7 +4,7 @@ Type: Tech-Debt
 Status: Backlog
 Priority: 🟢
 Bucket: data-quality
-Cycle: "1"
+Cycle:
 DependsOn: Flex trades ingest (done)
 StartDate: 
 EndDate: 

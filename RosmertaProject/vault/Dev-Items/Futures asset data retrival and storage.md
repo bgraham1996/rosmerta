@@ -4,12 +4,14 @@ Type: Feature
 Status: In Progress
 Priority: 🔴
 Bucket: core-components
-Cycle: "1"
+Cycle:
 DependsOn: 
 StartDate: 2026-09-20
 EndDate: 
 tags: 
 ---
+> [!info] Epic status — 2026-11-11. Schema + storage shipped in [[Cycle 1]]; IB retrieval + continuous series in [[Cycle 2]]. Remaining children (unscheduled): [[Futures in Asset and Market]], [[Futures continuous series follow-ups]]. Dashboard viewability is in flight on draft PR #13. Epics carry no `Cycle` — their children do.
+
 > [!note] Epic — decomposed 2026-09-20. This is now the umbrella for futures support; the actionable near-term slices are broken out into their own items (see Links). Kept your 🔴 / `core-components`.
 
 > [!success] Near-term slice complete — 2026-09-23. Both Cycle-1 children are **Done**: [[Futures schema - contracts as stocks]] (migration applied to live DB) and [[Futures OHLCV storage and retrieval]] (source-agnostic `ohlcv_store` + `futures` modules, `ib_api` delegating, 16 tests). Futures contracts can now be stored and read back, with root→children navigation, entirely without IB. Epic stays **In Progress** — the deferred Cycle-2 slices remain: [[Futures IB retrieval]] and [[Futures in Asset and Market]] (plus the still-open aggregation/roll/continuous-series questions below). Work on branch `worktree-futures-schema-migration` (unpushed).

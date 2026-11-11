@@ -4,7 +4,7 @@ Type: Feature
 Status: In Progress
 Priority: 🔴
 Bucket: workflows
-Cycle: "2"
+Cycle:
 DependsOn: Incremental Fetch and Dedup
 StartDate: 2026-09-20
 EndDate: 

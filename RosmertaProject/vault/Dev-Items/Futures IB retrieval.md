@@ -1,15 +1,17 @@
 ---
 FileType: 🚥 Dev Item
 Type: Feature
-Status: In Progress
+Status: Done
 Priority: 🟡
 Bucket: ingestion
 Cycle: "2"
 DependsOn: Futures OHLCV storage and retrieval
 StartDate: 2026-10-27
-EndDate: 
+EndDate: 2026-10-27
 tags: 
 ---
+> [!success] Done — 2026-10-27 ([[Cycle 2]]). Phases A–D + `futures` CLI group shipped and live-verified (PR #4). Open follow-up: draft PR #11 (don't truncate IB backfill on an empty chunk).
+
 # Summary
 Wire **IB** as a real source for the futures OHLCV storage built in [[Futures OHLCV storage and retrieval]]. Storage/retrieval was deliberately built source-agnostic first ([[Futures OHLCV storage and retrieval]] — Done, merged to main); this item connects IB as the first real producer that feeds candles through `ohlcv_store.upsert_hourly_bars` and registers contracts via `price_retrival/futures.py`.
 

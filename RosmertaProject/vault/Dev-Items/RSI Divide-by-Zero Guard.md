@@ -4,7 +4,7 @@ Type: Tech-Debt
 Status: Backlog
 Priority: 🟢
 Bucket: indicators
-Cycle: "2"
+Cycle:
 DependsOn: 
 StartDate: 
 EndDate: 

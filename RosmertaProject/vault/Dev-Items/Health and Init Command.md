@@ -4,7 +4,7 @@ Type: Feature
 Status: Backlog
 Priority: 🟡
 Bucket: workflows
-Cycle: "2"
+Cycle:
 DependsOn: 
 StartDate: 
 EndDate: 

@@ -4,7 +4,7 @@ Type: Feature
 Status: Backlog
 Priority: 🟡
 Bucket: analysis
-Cycle: "2"
+Cycle:
 DependsOn: Futures OHLCV storage and retrieval
 StartDate: 
 EndDate: 

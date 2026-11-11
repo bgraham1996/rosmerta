@@ -1,15 +1,17 @@
 ---
 FileType: 🚥 Dev Item
 Type: Feature
-Status: In Progress
+Status: Done
 Priority: 🟡
 Bucket: analysis
-Cycle: "3"
+Cycle: "2"
 DependsOn: Futures IB retrieval
 StartDate: 2026-10-27
-EndDate: 
+EndDate: 2026-10-31
 tags: 
 ---
+> [!success] Done — 2026-10-31 ([[Cycle 2]]); made bar-size aware in PR #8. The "Still open" list below was split out into [[Futures continuous series follow-ups]] (roll-schedule table, OI roll, `.c2`, session-aware resampling, sub-hourly continuous) and [[Futures in Asset and Market]] (consumption).
+
 > [!success] Built 2026-10-27 (volume roll + ratio back-adjustment, user-confirmed). `price_retrival/continuous.py`: pure `build_continuous(contracts)` (volume-crossover roll schedule + proportional back-adjustment, anchor = newest/front) + DB driver `build_and_store_continuous(conn, root)` that reads the raw `FUT` contracts and persists a `CONTFUT` child (`<root>.c1`). `futures.register_continuous` + migration `add_contfut_sec_type.sql` (allow `CONTFUT` in `sec_type`, applied to `rosmerta__prod`). CLI `futures continuous <ROOT>`. 6 unit tests on the pure builder. **Live-verified** across the real Sep-2026 ES roll: fetched ESU26 (expired, via new `include_expired`) + ESZ26, built `ES.c1` (1263 bars); **volume roll at 2026-09-14**, **ratio 1.00879** (contango), continuity step at the join **0.042%** (vs the ~0.88% raw gap), anchor close == raw front close. Cleaned up after.
 >
 > **Workflow (2026-10-27):** `workflows/refresh_data/update_futures.py` — one entry point that, per root, registers the term structure (incl. recently-expired), **incrementally** fetches the front + `HISTORY_CONTRACTS` prior contracts (from each contract's last stored bar, UTC, `ON CONFLICT` idempotent), and rebuilds the `CONTFUT` series. Live-verified for `ES`: 29 registered, ESU26+ESZ26 fetched, `ES.c1` built (4192 bars, roll 2026-09-14 ×1.0088). Mirrors the `update_core` pattern.

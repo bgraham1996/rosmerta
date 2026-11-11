@@ -1,15 +1,17 @@
 ---
 FileType: 🚥 Dev Item
 Type: Feature
-Status: Backlog
+Status: Done
 Priority: 🟡
 Bucket: ingestion
-Cycle: "3"
+Cycle: "2"
 DependsOn: 
 StartDate: 2026-10-27
-EndDate: 
+EndDate: 2026-10-31
 tags: 
 ---
+> [!success] Done — 2026-10-31 ([[Cycle 2]]). All four children shipped: [[Bar-size storage model]], [[Bar-size aware IB retrieval]], [[Bar size in the analysis layer]], [[Bar size in CLI and workflows]] (PR #6, 2026-10-28), plus bar-size-aware continuous futures (PR #8) and `init.sql` reconciled to `price_bars` (PR #9). Migration `add_bar_size_support.sql` applied to prod. Leftovers split out: [[IB historical-data pacing governor]] and sub-hourly continuous series in [[Futures continuous series follow-ups]].
+
 > [!note] Epic — decomposed 2026-10-27. Umbrella for making bar size configurable (primarily to enable **1-minute** retrieval). The actionable slices are broken out into their own items (see Phasing / Links). No code yet — this is the plan.
 
 # Summary
