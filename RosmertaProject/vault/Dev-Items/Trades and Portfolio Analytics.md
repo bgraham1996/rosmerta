@@ -5,7 +5,7 @@ Status: Planned
 Priority: 🟡
 Bucket: portfolio
 Cycle: "3"
-DependsOn: Flex Trade Timezone Fix
+DependsOn: Flex Trade Timezone Fix, Refresh stale equity prices and trades
 StartDate: 
 EndDate: 
 tags: 

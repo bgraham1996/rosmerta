@@ -1,16 +1,16 @@
 ---
 FileType: 🚥 Dev Item
 Type: Chore
-Status: Backlog
+Status: Planned
 Priority: 🔴
 Bucket: data-quality
-Cycle:
+Cycle: "3"
 DependsOn:
 StartDate:
 EndDate:
 tags:
 ---
-> [!warning] Found by [[Full codebase sanity check and test audit]] on 2026-11-12.
+> [!warning] Found by [[Full codebase sanity check and test audit]] on 2026-11-12; pulled into [[Cycle 3]] the same day.
 
 # Summary
 In the current prod DB (`rosmerta__prod` on localhost), **`fundamentals` and `dividends` are empty (0 rows)**, and `fetch_log` has no EDGAR or dividend entries at all. The schema is there (including the later-added columns), so it looks like only prices and trades came across when the DB moved local. Result: net income is NULL for all 100 stocks in the watchlist overview, and nothing that reads fundamentals or dividends has data.

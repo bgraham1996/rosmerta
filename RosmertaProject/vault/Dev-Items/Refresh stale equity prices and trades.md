@@ -1,16 +1,16 @@
 ---
 FileType: 🚥 Dev Item
 Type: Chore
-Status: Backlog
+Status: Planned
 Priority: 🔴
 Bucket: data-quality
-Cycle:
+Cycle: "3"
 DependsOn:
 StartDate:
 EndDate:
 tags:
 ---
-> [!warning] Found by [[Full codebase sanity check and test audit]] on 2026-11-12.
+> [!warning] Found by [[Full codebase sanity check and test audit]] on 2026-11-12; pulled into [[Cycle 3]] the same day.
 
 # Summary
 Prod equity data hasn't been refreshed since July. All **99** priced stocks' hourly bars stop at **2026-07-17** (last bulk run 2026-07-20, `fetch_log`). IB Flex trades stop at **2026-07-24** (21 rows; `position` is empty). Every hourly analysis, the weekly report, and the dashboard's recent windows run on four-month-old data. `ABB` is in `core` but has **no bars at all**.
