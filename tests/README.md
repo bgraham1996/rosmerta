@@ -11,9 +11,13 @@ uv run pytest -v       # verbose
 
 ## What's covered
 
-- `test_indicators.py` — the indicator registry (`sma`, `ema`, `rsi`,
-  `bollinger`, `obv`, `vwap`) against hand-verifiable inputs, plus the
-  `Indicator` wrapper (registry lookup, key identity, compute caching).
+- `test_indicators.py` — the indicator registry (`sma`, `ema`, `macd`, `rsi`,
+  `rsi_ema_cross`, `bollinger`, `stochastic`, `atr`, `adx`, `obv`, `vwap`, and the
+  forward-looking `days_offset_gain` / `trading_days_offset_gain` /
+  `max_forward_gain` / `max_forward_drawdown` / `bars_to_target`) against
+  hand-verifiable inputs, plus the `Indicator` wrapper (registry lookup, key
+  identity, compute caching). Reference docs live in
+  [`docs/indicators.md`](../docs/indicators.md).
 - `test_bars.py` — OHLCV resampling in `utils/bars.py`.
 - `test_data_models.py` — the analysis layer (`Asset` / `Market`) computations,
   driven by an in-memory fake connection.
