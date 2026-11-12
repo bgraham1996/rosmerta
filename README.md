@@ -151,7 +151,7 @@ rosmerta/
   main.py              # CLI entry point (click.group named `rosmerta`)
   db_config.py         # Loads the DB connection dict from .env
   data_models.py       # Analysis layer: Asset / Market (read-only over the DB)
-  indicators.py        # Technical-indicator registry (sma/ema/rsi/bollinger/obv/vwap)
+  indicators.py        # Technical-indicator registry (see docs/indicators.md)
   price_retrival/      # Data fetching modules (spelling is intentional)
     ib_api.py          # Interactive Brokers price bars
     edgar_api.py       # SEC EDGAR fundamentals client
@@ -178,7 +178,12 @@ analyzes data already in the DB:
   `seed_assets()` → `populate_assets()` → `get_panel()` / `get_market_stats()`.
 
 Technical indicators live in `indicators.py`: register a new one by writing an
-`@register("name")`-decorated function - no other wiring needed.
+`@register("name")`-decorated function - no other wiring needed. Registered:
+`sma`, `ema`, `ema_arb`, `macd`, `rsi`, `rsi_ema_cross`, `bollinger`,
+`stochastic`, `atr`, `adx`, `obv`, `vwap`, plus a forward-looking family
+(`days_offset_gain`, `trading_days_offset_gain`, `max_forward_gain`,
+`max_forward_drawdown`, `bars_to_target`). See **[docs/indicators.md](docs/indicators.md)**
+for the full catalog, the `Asset` `source=` contract, and how to add one.
 
 ## Configuration
 

@@ -14,7 +14,34 @@ import pytest
 from indicators import (
     Indicator, _REGISTRY, sma, ema, rsi, bollinger, obv, vwap, days_offset_gain,
     trading_days_offset_gain, rsi_ema_cross, macd, atr, stochastic, adx,
+    max_forward_gain, max_forward_drawdown, bars_to_target,
 )
+
+
+@pytest.fixture
+def ohlc_forward():
+    # Small, hand-verifiable OHLC frame. close is flat at 10 so gains/drawdowns
+    # read directly as fractions of 10; timestamps deliberately out of order to
+    # exercise the internal sort-by-timestamp.
+    return pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                [
+                    "2020-01-03",
+                    "2020-01-01",
+                    "2020-01-05",
+                    "2020-01-02",
+                    "2020-01-04",
+                ]
+            ),
+            "high": [9.0, 10.0, 11.0, 12.0, 15.0],
+            "low": [7.0, 10.0, 10.0, 8.0, 9.0],
+            "close": [10.0, 10.0, 10.0, 10.0, 10.0],
+        }
+    )
+    # After sort by timestamp the rows read:
+    #   day1 high=10 low=10 | day2 high=12 low=8 | day3 high=9 low=7
+    #   day4 high=15 low=9  | day5 high=11 low=10
 
 
 @pytest.fixture
@@ -422,3 +449,61 @@ def test_adx_structure_and_direction():
     tail = result.dropna()
     assert (tail["plus_di"] > tail["minus_di"]).all()
     assert ((tail["adx"] >= 0) & (tail["adx"] <= 100)).all()
+
+
+# --- Non-typical / forward-looking stats -----------------------------------
+
+
+def _in_timestamp_order(result, data):
+    """Reorder a result Series into ascending-timestamp order for assertions."""
+    return result.reindex(data.sort_values("timestamp").index).to_numpy()
+
+
+def test_max_forward_gain(ohlc_forward):
+    r = max_forward_gain(ohlc_forward, days_ahead=2, bars_per_day=1)
+    vals = _in_timestamp_order(r, ohlc_forward)
+    # highs (ts order): [10,12,9,15,11]; best high over next 2 bars vs close 10.
+    np.testing.assert_allclose(vals[:3], [0.2, 0.5, 0.5])
+    assert np.isnan(vals[3:]).all()  # last two windows run past the end
+
+
+def test_max_forward_drawdown(ohlc_forward):
+    r = max_forward_drawdown(ohlc_forward, days_ahead=2, bars_per_day=1)
+    vals = _in_timestamp_order(r, ohlc_forward)
+    # lows (ts order): [10,8,7,9,10]; worst low over next 2 bars vs close 10.
+    np.testing.assert_allclose(vals[:3], [-0.3, -0.3, -0.1])
+    assert np.isnan(vals[3:]).all()
+
+
+def test_bars_to_target_hit_and_miss(ohlc_forward):
+    # target +20% => threshold 12 against highs [10,12,9,15,11].
+    hit = bars_to_target(ohlc_forward, target=0.2, days_ahead=2, bars_per_day=1)
+    vals = _in_timestamp_order(hit, ohlc_forward)
+    np.testing.assert_allclose(vals[:3], [1, 2, 1])  # bars ahead to first hit
+    assert np.isnan(vals[3:]).all()
+    # target +60% => threshold 16, never reached: every position is NaN.
+    miss = bars_to_target(ohlc_forward, target=0.6, days_ahead=2, bars_per_day=1)
+    assert miss.isna().all()
+
+
+def test_forward_stats_preserve_index_and_empty():
+    # Empty input returns an empty float Series, not an error.
+    empty = pd.DataFrame({"timestamp": [], "high": [], "low": [], "close": []})
+    assert max_forward_gain(empty).empty
+    # Original index is preserved on realign (non-default index labels).
+    data = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2020-01-01", periods=4, freq="D"),
+            "high": [11.0, 12.0, 13.0, 14.0],
+            "low": [9.0, 10.0, 11.0, 12.0],
+            "close": [10.0, 11.0, 12.0, 13.0],
+        },
+        index=[100, 200, 300, 400],
+    )
+    r = max_forward_gain(data, days_ahead=1, bars_per_day=1)
+    assert list(r.index) == [100, 200, 300, 400]
+
+
+def test_forward_stats_registered():
+    for name in ["max_forward_gain", "max_forward_drawdown", "bars_to_target"]:
+        assert name in _REGISTRY

@@ -10,8 +10,13 @@ Add a new indicator by writing a ``@register``-decorated function that takes a
 price series (or OHLCV DataFrame, e.g. ``obv``/``vwap``) plus keyword params and
 returns a Series/DataFrame aligned to the input index. No other wiring needed.
 
-Built-ins: ``sma``, ``ema``, ``rsi``, ``macd``, ``bollinger``, ``atr``,
-``stochastic``, ``adx``, ``obv``, ``vwap``.
+Built-ins: ``sma``, ``ema``, ``ema_arb``, ``rsi``, ``rsi_ema_cross``, ``macd``,
+``bollinger``, ``atr``, ``stochastic``, ``adx``, ``obv``, ``vwap``, plus a
+forward-looking family (``days_offset_gain``, ``trading_days_offset_gain``,
+``max_forward_gain``, ``max_forward_drawdown``, ``bars_to_target``).
+
+Full catalog, the ``Asset`` ``source=`` contract, and usage recipes live in
+``docs/indicators.md``.
 """
 
 import pandas as pd
@@ -336,3 +341,109 @@ def trading_days_offset_gain(data, days_ahead=20, offset_column='close'):
     pct_gain = abs_gain / current
     return pd.DataFrame({'abs': abs_gain, 'pct': pct_gain}, index=data.index)
 
+
+# --- Non-typical / forward-looking stats -----------------------------------
+#
+# These are not classic technical indicators — they answer "if I had bought
+# here, what happened next?" over a bar-count lookahead window, in the same
+# spirit as ``days_offset_gain``. They take an OHLCV DataFrame with a
+# ``timestamp`` column (call via ``source=['timestamp', 'high', 'low',
+# 'close']``), the lookahead is ``days_ahead * bars_per_day`` whole bars so
+# ``bars_per_day`` must match the timeframe (8 hourly, 1 daily, 1/5 weekly),
+# and bars whose full window runs past the end of the series yield ``NaN``.
+
+def _forward_windows(values, window):
+    """For a time-ordered 1-D array, return ``(windows, valid)``.
+
+    ``windows`` is a ``(valid, window)`` array whose row ``i`` holds the
+    ``window`` values strictly after position ``i`` (``values[i+1 :
+    i+1+window]``), and ``valid = len(values) - window`` is the number of
+    positions that have a *complete* forward window. ``windows`` is ``None``
+    when no complete window exists (too few bars). Positions ``>= valid`` have
+    an incomplete forward window and should be left as ``NaN`` by the caller —
+    matching the ``days_offset_gain`` convention that a lookahead running past
+    the end yields ``NaN`` rather than a partial result.
+    """
+    valid = len(values) - window
+    if window < 1 or valid < 1:
+        return None, max(valid, 0)
+    # sliding_window_view row s = values[s:s+window]; the forward window for
+    # position i (values[i+1:...]) is therefore row i+1.
+    sw = np.lib.stride_tricks.sliding_window_view(values, window)
+    return sw[1:valid + 1], valid
+
+
+@register("max_forward_gain")
+def max_forward_gain(data, days_ahead=20, bars_per_day=8):
+    """Maximum Favorable Excursion: best fractional gain achievable if bought at
+    this bar's ``close`` and held for the next ``days_ahead`` days.
+
+    Measured as ``(max future high - close) / close`` over the forward window,
+    so it uses the intra-bar ``high`` (the best price actually touched), not the
+    close. Always >= 0 where defined. See the module note above for the window
+    and ``NaN`` conventions.
+    """
+    if data.empty:
+        return pd.Series(dtype='float64', index=data.index)
+
+    d = data.sort_values('timestamp')
+    close = d['close'].to_numpy()
+    windows, valid = _forward_windows(d['high'].to_numpy(), int(days_ahead * bars_per_day))
+
+    out = np.full(len(d), np.nan)
+    if windows is not None:
+        out[:valid] = (windows.max(axis=1) - close[:valid]) / close[:valid]
+    return pd.Series(out, index=d.index).reindex(data.index)
+
+
+@register("max_forward_drawdown")
+def max_forward_drawdown(data, days_ahead=20, bars_per_day=8):
+    """Maximum Adverse Excursion: worst fractional drawdown suffered if bought at
+    this bar's ``close`` and held for the next ``days_ahead`` days.
+
+    Measured as ``(min future low - close) / close`` over the forward window,
+    using the intra-bar ``low`` (the worst price actually touched). Typically
+    <= 0 where defined — the deepest hole you would have sat through. Useful for
+    sizing stops. See the module note above for the window and ``NaN`` rules.
+    """
+    if data.empty:
+        return pd.Series(dtype='float64', index=data.index)
+
+    d = data.sort_values('timestamp')
+    close = d['close'].to_numpy()
+    windows, valid = _forward_windows(d['low'].to_numpy(), int(days_ahead * bars_per_day))
+
+    out = np.full(len(d), np.nan)
+    if windows is not None:
+        out[:valid] = (windows.min(axis=1) - close[:valid]) / close[:valid]
+    return pd.Series(out, index=d.index).reindex(data.index)
+
+
+@register("bars_to_target")
+def bars_to_target(data, target=0.05, days_ahead=20, bars_per_day=8):
+    """Number of bars ahead until the ``high`` first reaches ``target`` fractional
+    gain above this bar's ``close``, within the next ``days_ahead`` days.
+
+    Answers "how long until my +``target`` exit fills?" for an entry at the
+    current close. Returns the 1-based bar offset of the first bar whose ``high``
+    meets ``close * (1 + target)``; ``NaN`` if the target is never hit inside the
+    window (or the window is incomplete). See the module note above for the
+    window and ``NaN`` conventions.
+    """
+    if data.empty:
+        return pd.Series(dtype='float64', index=data.index)
+
+    d = data.sort_values('timestamp')
+    close = d['close'].to_numpy()
+    windows, valid = _forward_windows(d['high'].to_numpy(), int(days_ahead * bars_per_day))
+
+    out = np.full(len(d), np.nan)
+    if windows is not None:
+        threshold = close[:valid] * (1 + target)
+        hit = windows >= threshold[:, None]
+        reached = hit.any(axis=1)
+        # argmax gives the first True per row; +1 because the window starts one
+        # bar ahead of the entry bar. Rows that never hit stay NaN.
+        first = np.where(reached, hit.argmax(axis=1) + 1, np.nan)
+        out[:valid] = first
+    return pd.Series(out, index=d.index).reindex(data.index)
