@@ -30,10 +30,8 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 
 > [!info] Started 2026-11-11 — items assigned, nothing being built yet. Suggested order: land the drafts → sanity check → schema → reorg / incremental fetch → TZ fix → portfolio analytics.
 
-## Land in-flight work (built in Cycle 2, needs review + merge):
-- [ ] [[IB backfill truncation on empty chunk]] 🟡 — draft PR #11.
-- [ ] [[Futures in the dashboard]] 🟡 — draft PR #13.
-- [ ] [[Reconcile DB schema - init migrations and scripts]] 🟡 — in progress; draft PR #12 covers the futures columns, rest of `init.sql` still to do.
+## Land in-flight work:
+- [ ] [[Reconcile DB schema - init migrations and scripts]] 🟡 — futures columns landed (PR #12); trades/positions + `watchlist_members` still missing from `init.sql`.
 
 ## Consolidate:
 - [ ] [[Full codebase sanity check and test audit]] 🔴 — may spawn fix items.
@@ -45,3 +43,10 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 - [ ] [[Trades and Portfolio Analytics]] 🟡 — carried from [[Cycle 1]].
 
 ## Done:
+- [x] [[IB backfill truncation on empty chunk]] — PR #11 merged `c657a8e` (2026-11-12).
+- [x] [[Futures in the dashboard]] — PR #13 merged `52623ec` (2026-11-12).
+
+## Also landed this cycle (outside the plan):
+- PR #16 (`12d6f06`): forward-looking indicators `max_forward_gain` / `max_forward_drawdown` / `bars_to_target` + `docs/indicators.md`, salvaged from an uncommitted worktree. Advances [[Docs for using indicators]].
+- Git cleanup: every stale worktree/branch removed; repo is down to `main`.
+- Test suite: 135 → **143** passing.

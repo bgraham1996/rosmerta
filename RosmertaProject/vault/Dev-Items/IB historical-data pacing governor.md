@@ -13,6 +13,8 @@ tags:
 # Summary
 Split out of [[Bar-size aware IB retrieval]] (Done, [[Cycle 2]]). Retrieval keeps a fixed `ib.sleep(1)` between chunks and the workflows add a larger inter-ticker delay for sub-hourly, but there is no real request-rate governor for IB's historical-data pacing (~60 requests / 10 min, no identical request within 15s). Not needed at today's volumes — only matters for large multi-year 1-minute backfills.
 
+**New trigger (2026-11-12):** since [[IB backfill truncation on empty chunk]] (PR #11), an empty chunk no longer ends the fetch loop, so a manual fetch with an early `-s` for a recently listed ticker or contract walks back one empty request per chunk to the start date. The refresh workflows bound their lookback and are unaffected; the CLI paths aren't.
+
 # Development Plan
 - [ ] A shared token-bucket / sliding-window limiter in `ib_api` used by every historical request.
 - [ ] Back off and retry on IB pacing-violation errors (code 162) instead of failing the ticker.
