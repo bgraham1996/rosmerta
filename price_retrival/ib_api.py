@@ -77,6 +77,24 @@ def _bar_interval(bar_size):
     return _BAR_INTERVAL[bar_size]
 
 
+def _as_utc_bound(value):
+    """Normalise a fetch bound to a **tz-aware UTC** ``datetime``.
+
+    Accepts a ``'YYYY-MM-DD'`` string, a ``date`` or a ``datetime``. Dates and
+    date strings become UTC midnight; a naive ``datetime`` is taken as UTC; an
+    aware one is converted. Keeping bounds aware means every ``endDateTime``
+    sent to IB carries an explicit zone (IB Warning 2174: implied time zones
+    are being removed from the API).
+    """
+    if isinstance(value, str):
+        value = datetime.strptime(value, '%Y-%m-%d')
+    if not isinstance(value, datetime):          # a plain date
+        value = datetime(value.year, value.month, value.day)
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _fetch_log_type(bar_size):
     """``fetch_log.data_type`` label for a bar size.
 
@@ -306,11 +324,13 @@ class IBStockDataFetcher:
                 if not self.connect():
                     return None
 
-            # Parse dates
-            if isinstance(start_date, str):
-                start_date = datetime.strptime(start_date, '%Y-%m-%d')
-            if isinstance(end_date, str):
-                end_date = datetime.strptime(end_date, '%Y-%m-%d')
+            # Parse dates to tz-aware UTC bounds. IB is dropping "implied time
+            # zone" support (Warning 2174: "will be removed in the next API
+            # release"), so every endDateTime we send must carry an explicit
+            # zone. ib_insync formats an aware datetime as 'YYYYMMDD HH:MM:SS UTC';
+            # a naive one would be converted using this machine's local zone.
+            start_date = _as_utc_bound(start_date)
+            end_date = _as_utc_bound(end_date)
 
             # Create and qualify the contract
             contract = Stock(ticker, exchange, currency)
@@ -332,13 +352,13 @@ class IBStockDataFetcher:
 
                 self.logger.info(
                     f"Fetching {ticker} {bar_size} bars: "
-                    f"chunk ending {current_end.strftime('%Y%m%d %H:%M:%S')}, "
+                    f"chunk ending {current_end.strftime('%Y%m%d %H:%M:%S')} UTC, "
                     f"duration {duration_str}"
                 )
 
                 bars = self.ib.reqHistoricalData(
                     contract,
-                    endDateTime=current_end.strftime('%Y%m%d %H:%M:%S'),
+                    endDateTime=current_end,   # tz-aware UTC -> explicit zone
                     durationStr=duration_str,
                     barSizeSetting=bar_size,
                     whatToShow='TRADES',
@@ -351,7 +371,10 @@ class IBStockDataFetcher:
                 if bars:
                     all_bars.extend(bars)
                     # Move the window back one bar past the earliest we received.
-                    current_end = bars[0].date.replace(tzinfo=None) - step
+                    # Stay tz-aware: equity bars arrive tz-aware in the Gateway's
+                    # zone; stripping tzinfo here is what forced the implied-zone
+                    # requests.
+                    current_end = self._to_utc(bars[0].date) - step
                 else:
                     # Don't truncate the backfill on an empty chunk (a holiday, or
                     # an IB "no data" response for a window ending mid-session):
@@ -424,9 +447,10 @@ class IBStockDataFetcher:
         tz-aware UTC value stores the exact instant regardless of session tz, and
         ``data_models.Asset`` queries this column with UTC-aware bounds, so true
         instants are what the analysis layer compares against. A naive input is
-        assumed already-UTC. (The equity path already stores tz-aware exchange-local
+        assumed already-UTC. (The equity path stores tz-aware exchange-local
         timestamps — ``_save_bars_to_db`` passes ``row.date`` with tzinfo intact — so
-        its instants are correct; its ``.replace(tzinfo=None)`` is pagination-only.)
+        its instants are correct; it also uses this helper for pagination so each
+        ``endDateTime`` is sent with an explicit zone.)
         """
         if getattr(dt, 'tzinfo', None) is None:
             d = dt if isinstance(dt, datetime) else datetime(dt.year, dt.month, dt.day)
