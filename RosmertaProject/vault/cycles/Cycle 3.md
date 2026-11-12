@@ -40,8 +40,7 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 
 ## Data (pulled in 2026-11-12 from the sanity check):
 - [ ] [[Refresh stale equity prices and trades]] 🔴 — hourly equity bars stop 2026-07-17, trades 2026-07-24; ABB never fetched. Needs IB Gateway.
-- [ ] [[Restore fundamentals and dividends in prod]] 🔴 — **in progress**: fundamentals restored 2026-11-12 (84/100 stocks); dividends paused, to load from IB.
-  - [ ] [[Dividends fetcher fixes and IB-sourced load]] 🔴 — forced-IB path + 2 bugs; needs IB Gateway.
+- [ ] [[Restore fundamentals and dividends in prod]] 🔴 — **in progress**: fundamentals restored 2026-11-12 (84/100 stocks); dividends **parked** (IB has no dividend history for this account, error 10358).
   - [ ] [[EDGAR fundamentals extraction fixes]] 🟡 — GEHC/AMZN/APGE/DOMO + bulk tally miscount.
 
 ## Portfolio:
