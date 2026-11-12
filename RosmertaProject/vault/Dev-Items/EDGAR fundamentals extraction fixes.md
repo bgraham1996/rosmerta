@@ -1,27 +1,34 @@
 ---
 FileType: 🚥 Dev Item
 Type: Tech-Debt
-Status: Planned
+Status: In Progress
 Priority: 🟡
 Bucket: data-quality
 Cycle: "3"
 DependsOn: 
-StartDate:
+StartDate: 2026-11-12
 EndDate:
 tags:
 ---
 > [!warning] Found while restoring fundamentals on 2026-11-12 ([[Restore fundamentals and dividends in prod]]).
 
+> [!info] Code fixed 2026-11-12 (PR "fix(edgar): TTM misclassification, Q4 EPS share sanity, save-failure reporting"). **Regression check:** old vs new extraction across all 84 `core` tickers with fundamentals (no DB). **77 unchanged**; the 7 that change are all corrections:
+> - AMZN, EXEL and VST get their real quarters back (10-Q TTM rows were labelled FY).
+> - ADSK, BIIB and MRK each had an absurd stored Q4 EPS (271,365.64; 1,111.98; −170,512.82), now 0.26, 1.06 and −0.17.
+> - SBUX FY revenue now comes from the 10-K.
+>
+> Stock-split years (AAPL, NVDA, GOOGL…) are unchanged. **Still to do in prod (after merge):** re-fetch the 7 changed tickers + GEHC, and delete 63 stale `FY` rows that the upsert can't remove (AMZN 56, EXEL 6, VST 1; exact list in the PR). The delete needs explicit OK first.
+
 # Summary (Tech Debt)
 The `bulk fundamentals --list core` restore left four US filers wrong or missing, and the bulk summary hides one of the failures.
 
 # Development Plan
-- [ ] **GEHC: derived Q4 EPS overflow.** `_derive_q4_records` builds Q4 = FY − (Q1+Q2+Q3). GEHC spun off in Jan 2023, so FY2022 exists without its pre-spin quarterlies, and the derived Q4 2022 got `eps_basic = eps_diluted = 5,550,000`. That overflows `NUMERIC(10,4)`, and **the whole GEHC save rolls back** (0 rows stored). Fix: only derive Q4 when all three quarters exist (and sanity-bound per-share values); store per-record so one bad row can't drop the ticker.
-- [ ] **Bulk tally miscount.** `bulk fundamentals` reported GEHC as ✓ / "0 failed" although `_save_fundamentals_to_db` failed (`fetch_log` has `status='error'`, "Failed to save to database"). The `FetchResult` should be `error` when the save fails.
-- [ ] **AMZN: quarters labelled FY.** All 75 AMZN rows have `period_type='FY'`, including periods ending 2026-09-30; only 19 have revenue. Fiscal-quarter detection (`_detect_fy_end_month` / `_determine_fiscal_quarter`) misclassifies AMZN's facts. Compare with AAPL (correct).
-- [ ] **APGE, DOMO: "not found in SEC company list".** These are US filers missing from the ticker→CIK map (renamed, delisted or acquired?). Verify on EDGAR; fix the symbol/CIK, or drop them from `core`.
-- [ ] Regression tests with captured company-facts fixtures (spin-off FY-only year; AMZN-shaped facts).
-- [ ] Re-run the four tickers into prod and confirm.
+- [x] **GEHC: derived Q4 EPS overflow.** *Corrected cause:* GEHC did have Q1–Q3. The FY2022 10-K's cover-page `shares_outstanding` is **100** (pre-spin-off), so Q4 EPS = $555M / 100 = 5,550,000, which overflowed `NUMERIC(10,4)` and rolled back the whole save. **Fix:** cross-check shares against the FY-implied count (FY NI / FY EPS); if it's more than 1000× off, use the implied count (GEHC Q4 2022 → 1.22). The 1000× tolerance leaves stock-split years alone. A final guard NULLs any EPS the column can't hold. Per-record saving not done: the guard removes the overflow, and per-ticker atomicity is kept.
+- [x] **Bulk tally miscount.** Fixed: `get_fundamentals` records `last_save_ok`; `bulk fundamentals` reports a rolled-back save as `error`, and `fetch fundamentals` no longer prints "✓ Saved" when it wasn't.
+- [x] **AMZN: quarters labelled FY.** *Cause:* AMZN reports trailing-twelve-month figures in its 10-Qs; >300-day duration → classified FY at every quarter end, and `get_fundamentals` then drops QR rows sharing a date with an FY row, so every quarter vanished. **Fix:** a >300-day figure is FY only from a `10-K*`; 10-Q TTM figures are skipped like YTD ones. AMZN: 75 FY-only → 92 (19 FY + quarters). Same bug in EXEL and VST.
+- [ ] **APGE, DOMO: "not found in SEC company list".** Checked 2026-11-12: absent from a freshly downloaded SEC map (10,405 tickers, no name match either) and unknown to IB. Almost certainly acquired/delisted. **Not a code issue**; needs a decision to drop them from `core` (or re-point to a successor ticker).
+- [x] Regression tests: `tests/test_edgar_extraction.py` (8 tests; 6 fail on the old code). Suite 156 → 164.
+- [ ] Re-run into prod after merge: GEHC + the 7 corrected tickers (AMZN, EXEL, VST, ADSK, BIIB, MRK, SBUX); delete the 63 stale FY rows (needs OK); confirm.
 
 # Dependencies
 ##### Depends on

@@ -294,7 +294,15 @@ def bulk_fetch_fundamentals(
                     save_to_db=True,
                 )
 
-                if records:
+                if records and fetcher.last_save_ok is False:
+                    # Records came back but the DB save failed and was rolled
+                    # back — nothing stored. Don't count it as a success.
+                    result = FetchResult(
+                        symbol=symbol, status='error', records=0,
+                        error=f'Fetched {len(records)} periods but the DB save '
+                              f'failed (rolled back); see log'
+                    )
+                elif records:
                     result = FetchResult(
                         symbol=symbol, status='success', records=len(records)
                     )
