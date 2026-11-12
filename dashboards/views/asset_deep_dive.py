@@ -16,6 +16,14 @@ class AssetDeepDiveView(View):
 
     DEFAULT_LOOKBACK_DAYS = 365
 
+    # Timeframes offered in the selector, finest → coarsest. The intraday sizes
+    # ('minute'…'hourly') read a stored price_bars bar_size directly; the coarse
+    # ones ('daily'…) resample up from the hourly base. Futures are stored at
+    # '1 min' only, so 'minute' is the one that renders them.
+    TIMEFRAME_OPTIONS = ["minute", "5min", "15min", "30min",
+                         "hourly", "daily", "weekly", "monthly"]
+    DEFAULT_TIMEFRAME = "hourly"
+
     def layout(self) -> html.Div:
         today = date.today()
         start_default = today - timedelta(days=self.DEFAULT_LOOKBACK_DAYS)
@@ -41,6 +49,18 @@ class AssetDeepDiveView(View):
                         start_date=start_default,
                         end_date=today,
                         display_format="YYYY-MM-DD",
+                    ),
+                ], className="control-group"),
+
+                html.Div([
+                    html.Label("Timeframe"),
+                    dcc.Dropdown(
+                        id=self.cid("timeframe"),
+                        options=[{"label": tf, "value": tf}
+                                 for tf in self.TIMEFRAME_OPTIONS],
+                        value=self.DEFAULT_TIMEFRAME,
+                        clearable=False,
+                        style={"width": "130px"},
                     ),
                 ], className="control-group"),
 
@@ -84,9 +104,10 @@ class AssetDeepDiveView(View):
             State(self.cid("ticker"), "value"),
             State(self.cid("date-range"), "start_date"),
             State(self.cid("date-range"), "end_date"),
+            State(self.cid("timeframe"), "value"),
             prevent_initial_call=False,
         )
-        def _load(n_clicks, ticker, start_date, end_date):
+        def _load(n_clicks, ticker, start_date, end_date, timeframe):
             import psycopg2
 
             from data_models import Asset
@@ -96,7 +117,8 @@ class AssetDeepDiveView(View):
             if not ticker:
                 return _empty_figure(), "Enter a ticker.", ""
 
-            ticker = ticker.strip().upper()
+            raw = ticker.strip()
+            timeframe = timeframe or self.DEFAULT_TIMEFRAME
 
             # Asset expects 'YYYY-MM-DD HH:MM:SS' strings.
             start_str = f"{start_date} 00:00:00"
@@ -105,7 +127,15 @@ class AssetDeepDiveView(View):
             try:
                 conn = psycopg2.connect(**get_db_config())
                 try:
-                    asset = Asset(conn, ticker, start_str, end_str)
+                    # Resolve the stored symbol case-insensitively, preferring an
+                    # exact match. Equities are upper-case (users type 'pfe'), but
+                    # the continuous-futures symbol is mixed-case (e.g. 'ES.c1'),
+                    # which a blind .upper() would mangle to an unknown 'ES.C1'.
+                    symbol = _resolve_symbol(conn, raw)
+                    if symbol is None:
+                        return _empty_figure(), f"Unknown ticker {raw!r}.", ""
+
+                    asset = Asset(conn, symbol, start_str, end_str, timeframe=timeframe)
                     prices_df = asset.get_prices(conn)
 
                     sma_20_ind = Indicator("sma", window=20)
@@ -118,10 +148,11 @@ class AssetDeepDiveView(View):
                 finally:
                     conn.close()
             except Exception as exc:
-                return _empty_figure(), f"Error loading {ticker}: {exc}", ""
+                return _empty_figure(), f"Error loading {raw}: {exc}", ""
 
             if prices_df is None or prices_df.empty:
-                return _empty_figure(), f"No price data for {ticker} in selected range.", ""
+                return (_empty_figure(),
+                        f"No {timeframe} price data for {symbol} in selected range.", "")
 
             # Set timestamp as index for the figure factory.
             prices_indexed = prices_df.set_index("timestamp")
@@ -137,7 +168,7 @@ class AssetDeepDiveView(View):
             rsi_14.index = close.index
 
             fig = price_with_indicators(
-                ticker=ticker,
+                ticker=symbol,
                 prices=close,
                 overlays={
                     "SMA(20)": sma_20,
@@ -148,10 +179,28 @@ class AssetDeepDiveView(View):
             )
 
             status = (
-                f"Loaded {ticker}: {len(close)} bars from "
+                f"Loaded {symbol} ({timeframe}): {len(close)} bars from "
                 f"{close.index[0]} to {close.index[-1]}."
             )
-            return fig, status, ticker
+            return fig, status, symbol
+
+
+def _resolve_symbol(conn, raw):
+    """Resolve a user-typed ticker to the stored ``stocks.symbol``, or ``None``.
+
+    Matches case-insensitively but prefers an exact match, so equities typed in
+    any case ('pfe' → 'PFE') and the mixed-case continuous-futures symbol
+    ('es.c1' → 'ES.c1') both resolve, while a genuine exact hit always wins over
+    a case-folded one. Returns the canonical stored symbol.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT symbol FROM stocks WHERE UPPER(symbol) = UPPER(%s) "
+            "ORDER BY (symbol = %s) DESC LIMIT 1",
+            (raw, raw),
+        )
+        row = cur.fetchone()
+    return row[0] if row else None
 
 
 def _empty_figure():
