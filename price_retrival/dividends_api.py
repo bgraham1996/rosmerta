@@ -100,11 +100,16 @@ class DividendRecord:
 # ============================================================
 def _get_or_create_stock(conn, symbol: str, exchange: str = 'SMART',
                          currency: str = 'USD') -> Optional[int]:
-    """Look up stock_id by symbol+exchange, creating a placeholder if absent."""
+    """Look up stock_id by symbol, creating a placeholder if absent.
+
+    Matches on ``symbol`` alone: ``stocks`` is UNIQUE(symbol) since the dedupe
+    migration, so a symbol+exchange lookup could miss an existing row stored
+    under another exchange and the placeholder INSERT would then fail.
+    """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT stock_id FROM stocks WHERE symbol = %s AND exchange = %s",
-            (symbol, exchange)
+            "SELECT stock_id FROM stocks WHERE symbol = %s",
+            (symbol,)
         )
         row = cur.fetchone()
         if row:

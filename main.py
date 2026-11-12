@@ -344,8 +344,13 @@ def fetch_trades(start, end, no_db):
         table.add_row("Errors", str(summary['errors']))
         console.print(table)
         console.print("[green]✓ Saved to database[/green]")
-    else:
+    elif no_db:
         console.print("[yellow]Database storage skipped (--no-db)[/yellow]")
+    else:
+        # get_trades returns summary=None when the DB save failed and was
+        # rolled back; don't report that as a deliberate --no-db skip.
+        console.print("[red]✗ Database save failed and was rolled back — "
+                      "nothing stored (see the error above).[/red]")
 
 
 # ─── Portfolio command ──────────────────────────────────────
