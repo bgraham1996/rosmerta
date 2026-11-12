@@ -1,7 +1,7 @@
 ---
 FileType: 🚥 Dev Item
 Type: Chore
-Status: Backlog
+Status: In Progress
 Priority: 🟢
 Bucket: docs
 Cycle:
@@ -10,6 +10,7 @@ StartDate:
 EndDate: 
 tags: 
 ---
+> [!info] Largely delivered 2026-11-12 by PR #16 (`12d6f06`): `docs/indicators.md` covers the registry, the `Indicator` wrapper, the `source=` contract, recipes, how to add one, and the full catalog. **Remaining:** detailed sections for `ema_arb`, `rsi_ema_cross` and `trading_days_offset_gain` (catalog rows only so far).
 
 # Feature Summary
 Write a **user-facing guide** for indicators: how the `@register` registry works, how to add one, and how to attach/read them on an `Asset` (`add_indicator`/`get_indicator`) and across a `Market` (`add_indicators`). The docstrings are good, but there's no single "how to" doc.

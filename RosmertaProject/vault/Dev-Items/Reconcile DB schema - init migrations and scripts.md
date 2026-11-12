@@ -10,7 +10,7 @@ StartDate:
 EndDate: 
 tags: 
 ---
-> [!info] Progress — 2026-11-11 (scheduled into [[Cycle 3]]). `init.sql` now creates `price_bars` + the `price_hourly` view (PR #9, merged). Draft PR #12 adds the futures columns to `stocks` (`parent_stock_id`, `sec_type`, `expiry`, `multiplier`). **Still missing from `init.sql`:** `trade`/`transaction`/`transfer`/`position`, `watchlist_members`, and `UNIQUE(symbol)` (it still declares `UNIQUE(symbol, exchange)`). The rest of the plan below (legacy archive, create bundle + run order, script separation, convention doc) is untouched.
+> [!info] Progress — 2026-11-11 (scheduled into [[Cycle 3]]). `init.sql` now creates `price_bars` + the `price_hourly` view (PR #9, merged). PR #12 (merged 2026-11-12, `98985af`) added the futures columns to `stocks` (`parent_stock_id`, `sec_type` + its 4-value CHECK, `expiry`, `multiplier`) and switched to `UNIQUE(symbol)`. Verified by loading `init.sql` into a throwaway Postgres 16: it builds clean, and a futures root/contract/`CONTFUT` round-trip works. **Still missing from `init.sql`:** `trade`/`transaction`/`transfer`/`position` and `watchlist_members`. The rest of the plan below (legacy archive, create bundle + run order, script separation, convention doc) is untouched.
 
 # Summary
 `db/init.sql` has drifted from the live schema, and structural DDL, one-off data migrations, and operational scripts are all jumbled together. Establish a clear, **manually maintained** creation-vs-upgrade split.
