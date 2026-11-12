@@ -10,6 +10,8 @@ StartDate:
 EndDate: 
 tags: 
 ---
+> [!warning] 2026-11-12: prod has only 21 trades (last 2026-07-24) and `position` is empty. Refresh first via [[Refresh stale equity prices and trades]].
+
 > [!info] Carried forward — headline [[V1001]] scope that didn't ship; scheduled into [[Cycle 3]] / [[V1002]]. Design: `project/design/portfolio-analytics.md`.
 
 

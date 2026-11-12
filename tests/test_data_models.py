@@ -292,6 +292,33 @@ def test_market_get_panel(market_db, date_bounds):
     assert m.get_panel(conn, "close") is panel
 
 
+def test_market_get_panel_with_member_without_bars(market_db, date_bounds):
+    """A watchlist member with no bars in the window must not break the panel.
+
+    Regression (found by the 2026-11-12 sanity check against prod): AAL/ABB had
+    no bars in the window, Asset.get_prices returned an empty frame with an
+    *object* 'timestamp', and get_panel's merge raised object-vs-datetime64 for
+    the whole market. The empty member should simply be an all-NaN column.
+    """
+    market_db.stocks["EMPTY"] = (3, "No Bars Ltd")   # no db.prices entry at all
+    market_db.watchlists["core"] = ["ACME", "BETA", "EMPTY"]
+    start, end = date_bounds
+    conn = market_db.conn()
+    m = Market(conn, start, end, stock_list="core")
+    m.seed_assets(conn)
+    m.populate_assets(conn)
+
+    empty = m.assets["EMPTY"].get_prices(conn)
+    assert empty.empty
+    assert str(empty["timestamp"].dtype).startswith("datetime64")
+
+    panel = m.get_panel(conn, "close")
+    assert len(panel) == 5
+    assert panel["EMPTY"].isna().all()
+    stats = m.get_market_stats(conn, "close")
+    assert (stats["count"].dropna() <= 2).all()   # EMPTY never counts
+
+
 def test_market_get_panel_avg_price(market_db, date_bounds):
     start, end = date_bounds
     conn = market_db.conn()

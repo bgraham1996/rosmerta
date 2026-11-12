@@ -18,7 +18,7 @@ Two classes:
 Dates are passed as ``'%Y-%m-%d %H:%M:%S'`` strings and treated as UTC.
 """
 
-from pandas import DataFrame, cut, merge
+from pandas import DataFrame, cut, merge, to_datetime
 from datetime import datetime as dt
 from datetime import timezone
 import numpy as np
@@ -113,6 +113,11 @@ class Asset:
             data = DataFrame(rows, columns=columns)
             for col in ['open', 'close', 'high', 'low', 'volume']:
                 data[col] = data[col].astype(float)
+            # Normalise to tz-aware UTC datetimes. Without this an asset with no
+            # bars in the window yields an *object*-typed empty 'timestamp'
+            # column, and Market.get_panel's merge on 'timestamp' raises
+            # (object vs datetime64[UTC]) for the whole market.
+            data['timestamp'] = to_datetime(data['timestamp'], utc=True)
 
             self._prices_cache = data if rule is None else resample_ohlcv(data, rule)
             return self._prices_cache
