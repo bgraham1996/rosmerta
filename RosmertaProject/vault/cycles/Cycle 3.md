@@ -28,15 +28,19 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 
 # Dev Items in Cycle
 
-> [!info] Started 2026-11-11 — items assigned, nothing being built yet. Suggested order: land the drafts → sanity check → schema → reorg / incremental fetch → TZ fix → portfolio analytics.
+> [!info] Started 2026-11-11 — items assigned, nothing being built yet. Suggested order: land the drafts → sanity check → **data refresh + restore** → schema → reorg / incremental fetch → TZ fix → portfolio analytics.
 
 ## Land in-flight work:
 - [ ] [[Reconcile DB schema - init migrations and scripts]] 🟡 — futures columns landed (PR #12); trades/positions + `watchlist_members` still missing from `init.sql`.
 
 ## Consolidate:
-- [ ] [[Full codebase sanity check and test audit]] 🔴 — **in progress**: pass 1 (DB-side) done 2026-11-12; IB checks blocked on Gateway. Fixed a `Market` crash; spawned [[Refresh stale equity prices and trades]] and [[Restore fundamentals and dividends in prod]] (both 🔴, unscheduled — candidates to pull in).
+- [ ] [[Full codebase sanity check and test audit]] 🔴 — **in progress**: pass 1 (DB-side) done 2026-11-12; IB checks blocked on Gateway. Fixed a `Market` crash; spawned [[Refresh stale equity prices and trades]] and [[Restore fundamentals and dividends in prod]] (both 🔴, pulled into this cycle — see *Data* below).
 - [ ] [[Finish Directory Reorg]] 🔴 — `data-models/` vs `data_models.py` + the `time-periods.py` syntax error.
 - [ ] [[Incremental Fetch and Dedup]] 🔴 — CLI paths, fundamentals skip, `fetch_log`, ticker dedupe.
+
+## Data (pulled in 2026-11-12 from the sanity check):
+- [ ] [[Refresh stale equity prices and trades]] 🔴 — hourly equity bars stop 2026-07-17, trades 2026-07-24; ABB never fetched. Needs IB Gateway.
+- [ ] [[Restore fundamentals and dividends in prod]] 🔴 — both tables empty in prod; recover from the old LAN DB or re-fetch from EDGAR.
 
 ## Portfolio:
 - [ ] [[Flex Trade Timezone Fix]] 🟢 — prerequisite for the analytics.
