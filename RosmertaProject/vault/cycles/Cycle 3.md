@@ -34,12 +34,11 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 - [ ] [[Reconcile DB schema - init migrations and scripts]] 🟡 — futures columns landed (PR #12); trades/positions + `watchlist_members` still missing from `init.sql`.
 
 ## Consolidate:
-- [ ] [[Full codebase sanity check and test audit]] 🔴 — **in progress**: pass 1 (DB-side) done 2026-11-12; IB checks blocked on Gateway. Fixed a `Market` crash; spawned [[Refresh stale equity prices and trades]] and [[Restore fundamentals and dividends in prod]] (both 🔴, pulled into this cycle — see *Data* below).
 - [ ] [[Finish Directory Reorg]] 🔴 — `data-models/` vs `data_models.py` + the `time-periods.py` syntax error.
 - [ ] [[Incremental Fetch and Dedup]] 🔴 — CLI paths, fundamentals skip, `fetch_log`, ticker dedupe.
 
 ## Data (pulled in 2026-11-12 from the sanity check):
-- [ ] [[Refresh stale equity prices and trades]] 🔴 — hourly equity bars stop 2026-07-17, trades 2026-07-24; ABB never fetched. Needs IB Gateway.
+- [ ] [[Refresh stale equity prices and trades]] 🔴 — **in progress**: prices current (97/100, 2026-11-12); trades waiting on PR #21; ABB/APGE/DOMO unresolvable.
 - [ ] [[Restore fundamentals and dividends in prod]] 🔴 — **in progress**: fundamentals restored 2026-11-12 (84/100 stocks); dividends **parked** (IB has no dividend history for this account, error 10358).
   - [ ] [[EDGAR fundamentals extraction fixes]] 🟡 — GEHC/AMZN/APGE/DOMO + bulk tally miscount.
 
@@ -48,6 +47,7 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 - [ ] [[Trades and Portfolio Analytics]] 🟡 — carried from [[Cycle 1]].
 
 ## Done:
+- [x] [[Full codebase sanity check and test audit]] — 2026-11-12. Fixed the `Market` crash (PR #18) and the trades/dividends stock lookup (PR #21); IB- and DB-side passes done.
 - [x] [[IB backfill truncation on empty chunk]] — PR #11 merged `c657a8e` (2026-11-12).
 - [x] [[Futures in the dashboard]] — PR #13 merged `52623ec` (2026-11-12).
 
