@@ -1,13 +1,13 @@
 ---
 FileType: 🚥 Dev Item
 Type: Tech-Debt
-Status: In Progress
+Status: Done
 Priority: 🔴
 Bucket: tech-debt
 Cycle: "3"
 DependsOn: 
 StartDate: 2026-11-12
-EndDate: 
+EndDate: 2026-11-12
 tags: 
 ---
 > [!info] Restored onto `main` 2026-11-11 from draft PR #7 (the item had only ever existed on that branch); scheduled into [[Cycle 3]] as the first item. Note it already records the bar-size migration as **applied to prod**. `init.sql` has since been reconciled for `price_bars` (PR #9) — the schema-reconciliation step here now hands off to [[Reconcile DB schema - init migrations and scripts]].
@@ -29,6 +29,8 @@ The migration generalised the **write/read** path (`ohlcv_store.upsert_bars`/`re
 
 # Findings — pass 1 (2026-11-12, DB-side; IB Gateway was down)
 
+> [!success] **Done 2026-11-12.** Pass 1 (DB-side) and pass 2 (IB-side) complete. Fixes shipped: `Market` crash (PR #18) and the trades/dividends stock lookup (PR #21). Follow-ups are tracked as their own items.
+
 > [!warning] Headline: the code mostly holds together, but **prod data is stale or missing.** Equity hourly prices stop at **2026-07-17** (all 99 stocks; last bulk run 2026-07-20). **`fundamentals` and `dividends` are empty (0 rows)**, apparently lost in the move to the local DB. Trades stop at 2026-07-24 (21 rows; `position` is empty). Spawned: [[Refresh stale equity prices and trades]] and [[Restore fundamentals and dividends in prod]].
 
 **Code bug found and fixed (this PR):** `Market` over the real `core` list crashed in `get_panel`. Members with no bars in the window (AAL, ABB) returned an empty price frame with an *object*-typed `timestamp`, and the merge raised object-vs-datetime64 for the whole market. Fix: `Asset.get_prices` now normalises `timestamp` to tz-aware UTC. Regression test `test_market_get_panel_with_member_without_bars` fails without the fix. Verified on prod: a 3,906 × 101 panel, with AAL/ABB as all-NaN columns.
@@ -44,17 +46,17 @@ The migration generalised the **write/read** path (`ohlcv_store.upsert_bars`/`re
 | Schema vs `init.sql` | Exact drift for [[Reconcile DB schema - init migrations and scripts]]: `init.sql` lacks `trade`/`transaction`/`transfer`/`position`, `watchlist_members`, `v_watchlists`; 5 `dividends` columns; 8 `fundamentals` columns. FK name on `price_bars` differs (cosmetic). Futures + `price_bars` parts match. |
 | `fetch_log` | ⚠️ Says ESZ26 had 2,086 `price_hourly` bars fetched on 2026-11-02, but 0 FUT hourly bars exist; they were likely removed by a manual cleanup without the log row. Minor. |
 | `.gitignore` | ⚠️ CLAUDE.md says `*.png` is ignored, but `.gitignore` line 11 is `.png` (a typo for `*.png`, matching only a file literally named `.png`), so `indicators_and_asset_test.py`'s `<TICKER>_price_levels.png` shows up as untracked. `.coverage` isn't ignored either. One-line fix. |
-| IB-dependent checks | ⏸ **Blocked**: CLI end-to-end, 1-min round-trip, `update_futures`, `update_core` passes. Need IB Gateway on `127.0.0.1:4001`. |
+| IB-dependent checks (pass 2, 2026-11-12) | ✅ IB API handshake. ✅ `update_core` (hourly): the full prod refresh, 97/100, 0 errors. ✅ `fetch price AAPL` 1-min + hourly (`--no-db`). ✅ `futures list ES`. ✅ `futures fetch ES --expiry 20261218 --bar-size '1 min'` (`--no-db`). ✅ `portfolio`. ⏭ `update_futures`: not run. At its default `'1 hour'` it would write hourly FUT bars and trigger the weekly-report futures leak noted above, and the ES 1-min pipeline was exercised by another session the same day. ⏭ Equity 1-min DB round-trip: not written (avoids test rows in prod); the 1-min read path is covered by the dashboard's `es.c1` minute check. ⚠️ IB Warning 2174 (implicit time zone) → [[IB API explicit time zone on historical requests]]. ⚠️ IB fundamentals unavailable (error 10358) → [[Dividends source and fetcher fixes]]. 🐞 Trades stock lookup → PR #21. |
 
 # Development Plan
 - [x] **Automated suite** — 144 passing; coverage per module recorded above.
 - [x] **Back-compat view consumers** — all correct today; latent futures-leak risk noted above.
 - [x] **Live-DB scripts** — run; script-level issues noted above (not code regressions).
 - [x] **Dashboard** — all callbacks exercised against prod.
-- [ ] **CLI end-to-end** — ⏸ needs IB Gateway.
-- [ ] **1-minute round-trip** — ⏸ needs IB Gateway.
-- [ ] **Futures pipeline** (`update_futures`) — ⏸ needs IB Gateway.
-- [ ] **Workflows** (`update_core`) — ⏸ needs IB Gateway (and is also the fix for stale prices).
+- [x] **CLI end-to-end** — fetch/futures/portfolio checked on 2026-11-12 (see table).
+- [x] **1-minute round-trip** — fetch checked (`--no-db`); read-back via `es.c1` minute. Equity 1-min DB write deliberately skipped.
+- [x] **Futures pipeline** — skipped on purpose (see table); fetch/list paths checked.
+- [x] **Workflows** (`update_core`) — ran for real as the prod refresh: 97/100, 0 errors.
 - [x] **Schema reconciliation** — exact drift handed to [[Reconcile DB schema - init migrations and scripts]].
 - [x] **Coverage additions** — regression test for the `Market` crash; fetcher coverage → [[CI and Fetcher Test Coverage]].
 
