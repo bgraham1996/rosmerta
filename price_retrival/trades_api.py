@@ -112,8 +112,14 @@ class IBTradesFetcher:
     def _get_or_create_stock(self, symbol, exchange, currency, con_id=None):
         """
         Resolve a stock to its stock_id, matching by IB con_id first, then by
-        symbol+exchange. Inserts a placeholder row if not found. Backfills
-        ib_con_id on existing rows when we learn it. Returns the stock_id.
+        symbol. Inserts a placeholder row if not found. Backfills ib_con_id on
+        existing rows when we learn it. Returns the stock_id.
+
+        The fallback matches on ``symbol`` alone: ``stocks`` is UNIQUE(symbol)
+        (dedupe migration), and our rows carry a routing exchange (``SMART``)
+        while Flex reports the listing exchange (``NYSE``). Matching on
+        symbol+exchange missed the existing row and the placeholder INSERT then
+        violated ``uq_stocks_symbol``, rolling back the whole trade batch.
         """
         if con_id and con_id in self._stock_id_cache:
             return self._stock_id_cache[con_id]
@@ -135,8 +141,8 @@ class IBTradesFetcher:
                     return row[0]
 
             cur.execute(
-                "SELECT stock_id, ib_con_id FROM stocks WHERE symbol = %s AND exchange = %s",
-                (symbol, exchange),
+                "SELECT stock_id, ib_con_id FROM stocks WHERE symbol = %s",
+                (symbol,),
             )
             row = cur.fetchone()
             if row:
