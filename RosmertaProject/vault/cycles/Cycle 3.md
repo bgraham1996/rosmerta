@@ -34,7 +34,7 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 - [ ] [[Reconcile DB schema - init migrations and scripts]] 🟡 — futures columns landed (PR #12); trades/positions + `watchlist_members` still missing from `init.sql`.
 
 ## Consolidate:
-- [ ] [[Full codebase sanity check and test audit]] 🔴 — may spawn fix items.
+- [ ] [[Full codebase sanity check and test audit]] 🔴 — **in progress**: pass 1 (DB-side) done 2026-11-12; IB checks blocked on Gateway. Fixed a `Market` crash; spawned [[Refresh stale equity prices and trades]] and [[Restore fundamentals and dividends in prod]] (both 🔴, unscheduled — candidates to pull in).
 - [ ] [[Finish Directory Reorg]] 🔴 — `data-models/` vs `data_models.py` + the `time-periods.py` syntax error.
 - [ ] [[Incremental Fetch and Dedup]] 🔴 — CLI paths, fundamentals skip, `fetch_log`, ticker dedupe.
 
