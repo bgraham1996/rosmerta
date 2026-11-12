@@ -160,6 +160,7 @@ def fetch_fundamentals(ticker, start, end, no_db):
             end_date=end,
             save_to_db=not no_db,
         )
+        save_ok = fetcher.last_save_ok
 
     if not records:
         console.print(f"[red]No fundamental data found for {ticker}[/red]")
@@ -185,10 +186,13 @@ def fetch_fundamentals(ticker, start, end, no_db):
 
     console.print(table)
 
-    if not no_db:
+    if no_db:
+        console.print("[yellow]Database storage skipped (--no-db)[/yellow]")
+    elif save_ok:
         console.print("[green]✓ Saved to database[/green]")
     else:
-        console.print("[yellow]Database storage skipped (--no-db)[/yellow]")
+        console.print("[red]✗ Database save failed and was rolled back — "
+                      "nothing stored (see the error above).[/red]")
 
 
 @fetch.command('dividends')

@@ -227,6 +227,12 @@ class EdgarFundamentalsFetcher:
         # CIK mapping cache
         self._ticker_to_cik = None
 
+        # Outcome of the most recent get_fundamentals() DB save:
+        # None = no save attempted, True = stored, False = save failed/rolled
+        # back. get_fundamentals returns the records either way, so callers
+        # (bulk fetch, CLI) must check this before reporting success.
+        self.last_save_ok = None
+
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
 
@@ -554,6 +560,14 @@ class EdgarFundamentalsFetcher:
                     continue
 
                 if duration_days > 300:
+                    # A ~12-month figure is only a fiscal year when it comes
+                    # from an annual report. Some companies (e.g. AMZN) also
+                    # report trailing-twelve-month figures in their 10-Qs;
+                    # classifying those as FY put an "FY" at every quarter end,
+                    # and get_fundamentals then dropped every real quarter that
+                    # shared the date. Skip TTM figures like YTD ones.
+                    if not form.startswith('10-K'):
+                        continue
                     period_type = 'FY'
                 elif duration_days <= 115:
                     period_type = 'QR'  # true single quarter
@@ -686,6 +700,39 @@ class EdgarFundamentalsFetcher:
         'cash_and_equivalents', 'total_debt', 'shares_outstanding',
     ]
 
+    # eps_basic / eps_diluted are NUMERIC(10,4): |value| must be < 10^6.
+    MAX_ABS_EPS = 1_000_000
+
+    # How far shares_outstanding may stray from the FY-implied share count
+    # before it's treated as nonsense. Wide on purpose: split restatements put
+    # legitimate values up to ~40x apart; garbage cover-page counts are off by
+    # many orders of magnitude.
+    SHARES_SANITY_FACTOR = 1000.0
+
+    @staticmethod
+    def _implied_shares(fy_rec):
+        """FY net income / FY EPS (diluted, else basic), or None if unknown."""
+        ni = fy_rec.get('net_income')
+        eps = fy_rec.get('eps_diluted') or fy_rec.get('eps_basic')
+        if not ni or not eps:
+            return None
+        implied = abs(ni / eps)
+        return implied or None
+
+    @classmethod
+    def _shares_plausible(cls, fy_rec, shares, tolerance=None):
+        """Is ``shares`` within ``tolerance``x of the FY's implied share count?
+
+        Returns True when the implied count can't be computed (nothing to
+        check against, so keep the existing behaviour).
+        """
+        tolerance = tolerance or cls.SHARES_SANITY_FACTOR
+        implied = cls._implied_shares(fy_rec)
+        if implied is None:
+            return True
+        ratio = abs(shares) / implied
+        return (1 / tolerance) <= ratio <= tolerance
+
     def _derive_q4_records(self, records):
         """
         Derive Q4 records from FY - (Q1 + Q2 + Q3) for each fiscal year.
@@ -763,9 +810,29 @@ class EdgarFundamentalsFetcher:
 
             # EPS: derive from Q4 net income / shares rather than
             # subtracting per-share figures (which don't subtract cleanly
-            # due to share count changes across quarters)
+            # due to share count changes across quarters) — but only when
+            # the share count is believable. shares_outstanding is a cover-
+            # page snapshot and can be nonsense for the derivation (GEHC's
+            # pre-spin-off FY2022 10-K reports 100 shares → Q4 EPS of
+            # 5,550,000, which overflowed NUMERIC(10,4) and rolled back the
+            # whole save). Cross-check it against the FY's own implied share
+            # count (FY net income / FY EPS). The tolerance is deliberately
+            # wide: EDGAR restates FY EPS after stock splits (AAPL, NVDA,
+            # GOOGL… up to ~40x apart from the as-of share count), and those
+            # years should keep the existing NI/shares behaviour. Only a
+            # nonsensical count (GEHC: ~4.5 million x off) is replaced — by
+            # the implied FY share count, not by subtracting per-share
+            # figures (subtraction mixes split-adjusted and unadjusted EPS).
             q4_ni = q4.get('net_income')
             q4_shares = q4.get('shares_outstanding')
+            if q4_shares and not self._shares_plausible(fy_rec, q4_shares):
+                implied = self._implied_shares(fy_rec)
+                self.logger.warning(
+                    f"FY {fy}: shares_outstanding={q4_shares} is implausible vs "
+                    f"FY net income / EPS (implied {implied:,.0f}); using the "
+                    f"implied count for Q4 EPS"
+                )
+                q4_shares = implied
             if q4_ni is not None and q4_shares and q4_shares != 0:
                 q4['eps_basic'] = round(q4_ni / q4_shares, 4)
                 q4['eps_diluted'] = round(q4_ni / q4_shares, 4)
@@ -782,6 +849,17 @@ class EdgarFundamentalsFetcher:
                         )
                     else:
                         q4[eps_field] = None
+
+            # Last-ditch guard: a value the eps columns (NUMERIC(10,4)) can't
+            # hold is certainly wrong, and would abort the ticker's whole save.
+            for eps_field in ('eps_basic', 'eps_diluted'):
+                v = q4.get(eps_field)
+                if v is not None and abs(v) >= self.MAX_ABS_EPS:
+                    self.logger.warning(
+                        f"FY {fy}: derived Q4 {eps_field}={v} is implausible; "
+                        f"storing NULL"
+                    )
+                    q4[eps_field] = None
 
             # Compute ratios on the derived Q4 record
             q4.update(self._compute_ratios(q4))
@@ -814,6 +892,8 @@ class EdgarFundamentalsFetcher:
         Returns:
             List of dicts (one per period), or None on error.
         """
+        self.last_save_ok = None
+
         # Parse dates
         if isinstance(start_date, str):
             start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
@@ -962,8 +1042,11 @@ class EdgarFundamentalsFetcher:
             stock_id = self._get_or_create_stock(
                 ticker.upper(), company_info['name']
             )
+            saved = False
             if stock_id:
                 saved = self._save_fundamentals_to_db(stock_id, records)
+            self.last_save_ok = bool(saved)
+            if stock_id:
                 if saved:
                     self._log_fetch(
                         stock_id, 'fundamentals',
