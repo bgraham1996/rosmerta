@@ -622,23 +622,32 @@ def futures_list(root):
 @click.option('--bar-size', default='1 hour', type=click.Choice(BAR_SIZES),
               help='Bar size / timeframe (default: 1 hour). Sub-hourly over long '
                    'ranges issues many IB requests — keep the window tight.')
+@click.option('--include-expired', is_flag=True,
+              help='Allow --expiry to name an already-expired contract '
+                   '(for backfilling history; requires --expiry)')
 @click.option('--no-db', is_flag=True, help='Skip database storage')
-def futures_fetch(root, expiry, exchange, currency, start, end, bar_size, no_db):
+def futures_fetch(root, expiry, exchange, currency, start, end, bar_size,
+                  include_expired, no_db):
     """Fetch bars for a futures contract (front-month by default) at a bar size.
 
     With no --expiry, registers the term structure and fetches the active
     (front-month) contract. Front-month selection needs the DB, so --no-db
-    requires an explicit --expiry.
+    requires an explicit --expiry. IB only qualifies live contracts by default;
+    pass --include-expired (with --expiry) to backfill one that has expired.
 
     Example: rosmerta futures fetch ES                   # front month
     Example: rosmerta futures fetch ES --expiry 20261218
     Example: rosmerta futures fetch ES --expiry 20261218 --bar-size '1 min'
+    Example: rosmerta futures fetch ES --expiry 20260320 --include-expired -s 2026-01-01 -e 2026-03-21
     """
     from price_retrival.ib_api import IBStockDataFetcher
 
     root = root.upper()
     if no_db and not expiry:
         console.print("[red]--no-db requires --expiry (front-month selection needs the DB).[/red]")
+        return
+    if include_expired and not expiry:
+        console.print("[red]--include-expired requires --expiry (the front month is never expired).[/red]")
         return
 
     db_config = get_db_config(no_db)
@@ -649,7 +658,7 @@ def futures_fetch(root, expiry, exchange, currency, start, end, bar_size, no_db)
             df = fetcher.get_futures_hourly_bars(
                 root, expiry, exchange, currency=currency,
                 start_date=start, end_date=end, save_to_db=not no_db,
-                bar_size=bar_size,
+                include_expired=include_expired, bar_size=bar_size,
             )
         else:
             console.print(f"[cyan]Fetching {root} front-month {bar_size} bars[/cyan] on {exchange} ({start or '~30d'} → {end or 'now'})")
