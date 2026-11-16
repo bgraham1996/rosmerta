@@ -158,10 +158,13 @@ uv run main.py futures list ES                           # list contracts, mark 
 uv run main.py futures fetch ES                          # fetch the front-month contract
 uv run main.py futures fetch ES --expiry 20261218 -s 2026-10-01 -e 2026-10-20
 uv run main.py futures fetch ES --expiry 20261218 -s 2026-10-20 -e 2026-10-24 --bar-size '1 min'
+uv run main.py futures fetch ES --expiry 20260320 --include-expired -s 2026-01-01 -e 2026-03-21  # expired contract
 uv run main.py futures continuous ES                     # build + store ES.c1 (prints the roll schedule)
 ```
 
 `futures fetch` defaults to the front month (needs the DB; `--no-db` therefore requires `--expiry`).
+IB qualifies only live contracts by default, so backfilling an expired one needs `--include-expired`
+(only valid together with `--expiry` — the front month is never expired).
 `futures continuous` builds from contracts already in the DB — fetch first (or use the workflow).
 
 **Bar size.** `--bar-size` (default `'1 hour'`; also `'1 min'`/`'5 mins'`/`'15 mins'`/`'30 mins'`) applies
