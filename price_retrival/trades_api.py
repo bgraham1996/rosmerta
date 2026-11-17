@@ -23,6 +23,11 @@ plus one ``trade`` row (stock_id, quantity, price, datetime). The Flex
 ``tradeID`` is stored in ``trade.ib_trade_id`` (see the
 ``add_trade_ib_id`` migration) so re-runs are idempotent.
 
+Time zone: Flex ``dateTime`` values are naive wall-clock times in **US/Eastern**
+(IB's statement time zone; e.g. fills land 09:30–16:00). They are localised to
+``FLEX_TZ`` and stored as UTC, never left naive — a naive value would be stamped
+with the DB session's zone (Europe/London) and land 4–5 h early.
+
 Scope: stock (``STK``) trades only — the ``trade`` table is keyed to
 ``stocks``. Options/forex/other asset categories are skipped and logged.
 """
@@ -44,6 +49,9 @@ from ib_insync import FlexReport
 # mirror resolves fine. IB's SendRequest response also hands back a GetStatement
 # URL on gdcdyn, so we drive the exchange ourselves and rewrite the host. See
 # _download_flex_report below.
+# Flex reports execution times as naive US/Eastern wall-clock (see module doc).
+FLEX_TZ = "America/New_York"
+
 FLEX_HOST = "https://ndcdyn.interactivebrokers.com"
 _FLEX_SEND_PATH = "/Universal/servlet/FlexStatementService.SendRequest"
 
@@ -297,6 +305,22 @@ class IBTradesFetcher:
             ts = pd.to_datetime(text, format='%Y%m%d', errors='coerce')
         return None if pd.isna(ts) else ts.to_pydatetime()
 
+    @classmethod
+    def _parse_exec_dt(cls, value):
+        """Parse a Flex execution time into a tz-aware **UTC** datetime.
+
+        Naive values are Flex wall-clock times in ``FLEX_TZ`` (US/Eastern) and
+        are localised there first (DST-aware); already tz-aware values are just
+        converted. Returns None when the value can't be parsed.
+        """
+        dt = cls._parse_dt(value)
+        if dt is None:
+            return None
+        ts = pd.Timestamp(dt)
+        if ts.tzinfo is None:
+            ts = ts.tz_localize(FLEX_TZ)
+        return ts.tz_convert("UTC").to_pydatetime()
+
     def _existing_trade_ids(self):
         """Return the set of ib_trade_id values already in the trade table."""
         with self.db_conn.cursor() as cur:
@@ -356,12 +380,14 @@ class IBTradesFetcher:
                         errors += 1
                         continue
 
-                    trade_dt = self._parse_dt(
-                        getattr(row, 'dateTime', None) or getattr(row, 'tradeDate', None)
-                    )
+                    raw_dt = getattr(row, 'dateTime', None) or getattr(row, 'tradeDate', None)
+                    # Stored as UTC (Flex times are US/Eastern wall-clock).
+                    trade_dt = self._parse_exec_dt(raw_dt)
                     # Some Trades queries emit only dateTime (no tradeDate column);
-                    # fall back to the execution date so transaction_date isn't NULL.
-                    trade_date = self._parse_dt(getattr(row, 'tradeDate', None)) or trade_dt
+                    # fall back to the execution's *exchange-local* date so
+                    # transaction_date isn't NULL (and isn't shifted by UTC).
+                    trade_date = (self._parse_dt(getattr(row, 'tradeDate', None))
+                                  or self._parse_dt(raw_dt))
                     quantity = int(abs(float(getattr(row, 'quantity', 0) or 0)))
                     price = getattr(row, 'tradePrice', None)
 
