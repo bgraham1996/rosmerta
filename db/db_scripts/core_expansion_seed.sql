@@ -1,9 +1,12 @@
 -- ============================================================
--- SEED: Core watchlist expansion (49 new tickers)
+-- SEED: Core watchlist expansion (48 new tickers)
 -- ============================================================
 -- Adds new stock records and assigns them to the existing
 -- 'core' watchlist. The IB fetcher will backfill full stock
 -- details (name, ib_con_id, etc.) on first fetch.
+--
+-- 2026-11-17: ABB, APGE and DOMO removed (unknown to IB; APGE/DOMO also gone
+-- from SEC, likely delisted) to match the live 'core' (97 symbols).
 --
 -- Safe to re-run: uses ON CONFLICT to skip existing records.
 --
@@ -31,7 +34,6 @@ INSERT INTO stocks (symbol, name, exchange, currency) VALUES
     ('INCY',  'INCY',  'NASDAQ', 'USD'),
     ('RHHBY', 'RHHBY', 'OTC',    'USD'),
     ('BNTX',  'BNTX',  'NASDAQ', 'USD'),
-    ('APGE',  'APGE',  'NASDAQ', 'USD'),
     ('RPRX',  'RPRX',  'NASDAQ', 'USD'),
     ('ZTS',   'ZTS',   'NYSE',   'USD'),
     ('EXEL',  'EXEL',  'NASDAQ', 'USD'),
@@ -73,7 +75,6 @@ INSERT INTO stocks (symbol, name, exchange, currency) VALUES
     ('XYL',   'XYL',   'NYSE',   'USD'),
     ('ARE',   'ARE',   'NYSE',   'USD'),
     -- US replacements for European tickers
-    ('ABB',   'ABB',   'NYSE',   'USD'),   -- replaces ABBN (SIX)
     ('HON',   'HON',   'NASDAQ', 'USD'),   -- replaces SIE (XETRA)
     ('AWK',   'AWK',   'NYSE',   'USD'),   -- replaces VIE (Euronext)
     ('TECK',  'TECK',  'NYSE',   'USD'),   -- replaces GLEN (LSE)
@@ -92,7 +93,7 @@ FROM stocks s
 WHERE s.symbol IN (
     'IBKR', 'MS',
     'TSM',  'ASML', 'MU',   'SNOW',
-    'NVS',  'INCY', 'RHHBY','BNTX', 'APGE', 'RPRX', 'ZTS', 'EXEL', 'JAZZ',
+    'NVS',  'INCY', 'RHHBY','BNTX', 'RPRX', 'ZTS', 'EXEL', 'JAZZ',
     'DHR',  'ILMN', 'A',    'CRL',  'GEHC', 'TECH', 'ALC', 'BDX',  'TWST',
     'SBUX',
     'CAT',  'FDX',  'UPS',  'GEV',  'NUE',  'PLD',
@@ -100,7 +101,7 @@ WHERE s.symbol IN (
     'TTE',  'VST',  'SO',   'CEG',
     'FCX',
     'XYL',  'ARE',
-    'ABB',  'HON',  'AWK',  'TECK', 'WM',   'RGEN'
+    'HON',  'AWK',  'TECK', 'WM',   'RGEN'
 )
 ON CONFLICT (stock_id, list_name) DO NOTHING;
 

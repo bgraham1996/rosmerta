@@ -1,5 +1,5 @@
 -- ============================================================
--- SEED: generic classification tags for the 99 priced stocks
+-- SEED: generic classification tags for the 97 'core' stocks
 -- ============================================================
 -- 3-5 tags per stock across four categories:
 --   sector   - broad GICS-style sector (healthcare, technology, ...)
@@ -55,10 +55,6 @@ FROM (VALUES
     ('AMZN','industry','e_commerce'),
     ('AMZN','theme','cloud'),
     ('AMZN','theme','megacap'),
-    ('APGE','sector','healthcare'),
-    ('APGE','industry','biotech'),
-    ('APGE','theme','immunology'),
-    ('APGE','theme','small_cap'),
     ('ARE','sector','real_estate'),
     ('ARE','industry','reit'),
     ('ARE','theme','life_science_real_estate'),
@@ -125,10 +121,6 @@ FROM (VALUES
     ('DIS','industry','media'),
     ('DIS','theme','entertainment'),
     ('DIS','theme','streaming'),
-    ('DOMO','sector','technology'),
-    ('DOMO','industry','software'),
-    ('DOMO','theme','cloud'),
-    ('DOMO','theme','small_cap'),
     ('DOW','sector','materials'),
     ('DOW','industry','commodity_chemicals'),
     ('DOW','theme','chemicals'),

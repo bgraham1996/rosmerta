@@ -1,13 +1,15 @@
 -- ============================================================
--- SEED: Original core watchlist (50 tickers)
+-- SEED: Original core watchlist (49 tickers)
 -- ============================================================
 -- Restores the original 'core' watchlist tickers from the old
 -- database (db_exports/tickers.csv + watchlist_export.csv,
 -- old stock_ids 1-58, deduplicated to 50 distinct symbols).
 --
 -- The companion script core_expansion_seed.sql covers the other
--- 50 'core' symbols (the March 2026 expansion, old ids 101-150).
--- Run both to fully reconstruct the 100-symbol 'core' watchlist.
+-- 48 'core' symbols (the March 2026 expansion, old ids 101-150).
+-- Run both to fully reconstruct the 97-symbol 'core' watchlist.
+-- 2026-11-17: ABB, APGE and DOMO removed (unknown to IB; APGE/DOMO also gone
+-- from SEC, likely delisted) to match the live 'core' (97 symbols).
 --
 -- Name defaults to the symbol as a placeholder; the IB fetcher
 -- backfills full details (name, ib_con_id, etc.) on first fetch.
@@ -38,7 +40,6 @@ INSERT INTO stocks (symbol, name, exchange, currency) VALUES
     ('DD',    'DD',    'NYSE',   'USD'),
     ('DE',    'DE',    'NYSE',   'USD'),
     ('DIS',   'DIS',   'NYSE',   'USD'),
-    ('DOMO',  'DOMO',  'NASDAQ', 'USD'),
     ('DUK',   'DUK',   'NYSE',   'USD'),
     ('DXCM',  'DXCM',  'NASDAQ', 'USD'),
     ('F',     'F',     'NYSE',   'USD'),
@@ -83,7 +84,7 @@ SELECT
 FROM stocks s
 WHERE s.symbol IN (
     'AAL',  'AAPL', 'ABBV', 'ABT',  'ADSK', 'AMD',  'AMGN', 'AMZN', 'AZN',  'BAC',
-    'BIIB', 'BMY',  'COST', 'CVS',  'DD',   'DE',   'DIS',  'DOMO', 'DUK',  'DXCM',
+    'BIIB', 'BMY',  'COST', 'CVS',  'DD',   'DE',   'DIS',  'DUK',  'DXCM',
     'F',    'GILD', 'GOOGL','GSK',  'IBM',  'INTC', 'JNJ',  'KO',   'LLY',  'MA',
     'MDT',  'META', 'MMM',  'MRK',  'MRNA', 'MSFT', 'NVDA', 'NVO',  'ORCL', 'PEP',
     'PFE',  'PG',   'PYPL', 'REGN', 'SMR',  'T',    'TMO',  'V',    'VTRS', 'VZ'
