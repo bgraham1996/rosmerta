@@ -23,7 +23,7 @@ Prod equity data hasn't been refreshed since July. All **99** priced stocks' hou
 # Development Plan
 - [x] Start IB Gateway; run `workflows/refresh_data/update_core.py` (hourly, `core`). → 97/100 current to 2026-11-12, 55,838 bars, no pacing errors.
 - [ ] Investigate `ABB` (never fetched; IB has no `ABB` on SMART/USD) and `APGE`/`DOMO` (now unknown to both IB and SEC). Fix the symbols or drop them from `core`.
-- [ ] Re-run the IB Flex trades ingest to bring `trade`/`transaction` current (prerequisite for [[Trades and Portfolio Analytics]]). → Blocked on PR #21 (84 trades waiting).
+- [x] Re-run the IB Flex trades ingest to bring `trade`/`transaction` current (prerequisite for [[Trades and Portfolio Analytics]]). → Done 2026-11-17: 18 inserted, 21 duplicates, 45 forex skipped, 0 errors; `trade` 21 → 39 (to 2026-11-04). `fetch trades` itself was throttled (SendRequest refused for ~11 min after an uncollected earlier request), so the report was collected by its ReferenceCode and loaded through `get_trades`. Flex query period is YearToDate (2026 only). Timestamps then fixed by [[Flex Trade Timezone Fix]].
 - [ ] Decide on a cadence (cron/launchd) so this doesn't silently go stale again; [[Data Refresh Workflows]] / [[Health and Init Command]] could surface last-bar age.
 
 # Dependencies
