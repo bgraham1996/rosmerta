@@ -38,13 +38,13 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 - [ ] [[Incremental Fetch and Dedup]] 🔴 — CLI paths, fundamentals skip, `fetch_log`, ticker dedupe.
 
 ## Data (pulled in 2026-11-12 from the sanity check):
-- [ ] [[Refresh stale equity prices and trades]] 🔴 — **in progress**: prices current (97/100, 2026-11-12); trades waiting on PR #21; ABB/APGE/DOMO unresolvable.
+- [ ] [[Refresh stale equity prices and trades]] 🔴 — **in progress**: prices current (97/100, 2026-11-12); trades loaded 2026-11-17 (`trade` 21 → 39, to 2026-11-04); ABB/APGE/DOMO unresolvable.
 - [ ] [[Restore fundamentals and dividends in prod]] 🔴 — **in progress**: fundamentals restored 2026-11-12 (84/100 stocks); dividends **parked** (IB has no dividend history for this account, error 10358).
   - [x] [[EDGAR fundamentals extraction fixes]] 🟡 — code merged (PR #23). APGE/DOMO likely delisted (watchlist decision).
   - [ ] [[Clean up and re-fetch corrected fundamentals]] 🟡 — back up, delete 63 stale FY rows, re-fetch 8 tickers, verify. Needs OK for the delete.
 
 ## Portfolio:
-- [ ] [[Flex Trade Timezone Fix]] 🟢 — prerequisite for the analytics.
+- [x] [[Flex Trade Timezone Fix]] 🟢 — PR #26 merged `a0abbee` (2026-11-17). Flex times are US/Eastern and are now stored as UTC; all 39 prod rows backfilled.
 - [ ] [[Trades and Portfolio Analytics]] 🟡 — carried from [[Cycle 1]].
 
 ## Done:
