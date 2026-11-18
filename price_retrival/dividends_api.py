@@ -524,8 +524,10 @@ MIN_STEP = 2e-5
 MIN_AMOUNT = 0.005
 #: Snap to a 3-decimal amount when within this distance (0.4299 -> 0.430).
 SNAP_TOLERANCE = 0.00015
-#: An amount this many times the series median is flagged 'special'.
+#: An amount this many times its neighbours' is flagged 'special'.
 SPECIAL_MULTIPLE = 3.0
+#: How many payments either side form the "neighbours" for the special test.
+SPECIAL_WINDOW = 4
 
 #: Median gap (days) between ex-dates -> frequency label.
 _FREQUENCY_BANDS = [
@@ -554,6 +556,38 @@ def _infer_frequency(ex_dates: list[date]) -> Optional[str]:
         if median <= limit:
             return label
     return 'irregular'
+
+
+def _median(values: list[float]) -> float:
+    s = sorted(values)
+    n = len(s)
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def _special_flags(amounts: list[float]) -> list[bool]:
+    """Flag payments that stand out from the payments around them.
+
+    A payment is special when, on every side that has payments (up to
+    ``SPECIAL_WINDOW`` before and after), it is more than ``SPECIAL_MULTIPLE``
+    times both the side's median and the nearest payment on that side.
+
+    Comparing locally, not with the whole history, keeps a dividend that grew
+    a lot over the years (IBKR, NVDA) regular: after a step-up, the next
+    payment is at the new level, so the step isn't "special". The cost is that
+    the newest payment is judged on the earlier side only until the next one
+    arrives; a re-fetch re-evaluates it.
+    """
+    flags = []
+    for i, amount in enumerate(amounts):
+        sides = [amounts[max(0, i - SPECIAL_WINDOW):i][::-1],
+                 amounts[i + 1:i + 1 + SPECIAL_WINDOW]]
+        sides = [s for s in sides if s]
+        flags.append(len(amounts) >= 3 and bool(sides) and all(
+            amount > SPECIAL_MULTIPLE * _median(s)
+            and amount > SPECIAL_MULTIPLE * s[0]
+            for s in sides
+        ))
+    return flags
 
 
 def _to_date(value) -> date:
@@ -591,12 +625,10 @@ def derive_dividends_from_bars(raw_closes, adjusted_closes,
             events.append((cur, amount))
 
     frequency = _infer_frequency([d for d, _ in events])
-    amounts = sorted(a for _, a in events)
-    median = amounts[len(amounts) // 2] if amounts else 0.0
+    specials = _special_flags([a for _, a in events])
 
     records = []
-    for ex_date, amount in events:
-        special = len(events) >= 4 and amount > SPECIAL_MULTIPLE * median
+    for (ex_date, amount), special in zip(events, specials):
         records.append(DividendRecord(
             ex_date=ex_date,
             pay_date=None,

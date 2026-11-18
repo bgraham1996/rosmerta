@@ -39,10 +39,10 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 
 ## Data (pulled in 2026-11-12 from the sanity check):
 - [x] [[Refresh stale equity prices and trades]] 🔴: **done 2026-11-18**. prices current (97/97, 2026-11-12); trades loaded 2026-11-17 (`trade` 21 → 39, to 2026-11-04); ABB/APGE/DOMO dropped from `core` 2026-11-17 (100 → 97). The refresh cadence moved to [[Cycle 4]] as [[Scheduled data refresh]] (with [[Headless IB]]).
-- [ ] [[Restore fundamentals and dividends in prod]] 🔴 — **in progress**: fundamentals restored 2026-11-12 and corrected 2026-11-17 (85/97 stocks); dividends **un-parked 2026-11-18**: IB-derived history built (see below), load pending.
+- [x] [[Restore fundamentals and dividends in prod]] 🔴 — **done 2026-11-18**: fundamentals restored 2026-11-12 and corrected 2026-11-17 (85/97 stocks); dividends loaded 2026-11-18 from IB: 2,677 `ib_adjusted` rows for 82 of 97 `core` stocks (2016-11-22 → 2026-11-16); the other 15 pay no dividend. PFE 2025 = 4 × $0.43, KO 2025 = $2.04.
   - [x] [[EDGAR fundamentals extraction fixes]] 🟡 — code merged (PR #23). APGE/DOMO dropped from `core` 2026-11-17.
   - [x] [[Clean up and re-fetch corrected fundamentals]] 🟡 — done 2026-11-17: backed up, deleted the 63 stale FY rows, re-fetched 8 tickers, all checks pass.
-  - [ ] [[Dividends source and fetcher fixes]] 🔴 — pulled in 2026-11-18. Source chosen: **IB only**, ex-dates + amounts derived from daily adjusted vs unadjusted closes (`source='ib_adjusted'`). Code in a PR; then delete the 56 bad PFE EDGAR rows and `bulk dividends --list core`.
+  - [x] [[Dividends source and fetcher fixes]] 🔴 — done 2026-11-18. **IB only**: ex-dates + amounts derived from daily adjusted vs unadjusted closes (`source='ib_adjusted'`), PR #33 `9885b6a` + special-flag fix. 56 bad PFE EDGAR rows backed up and deleted; `core` loaded.
 
 ## Portfolio:
 - [x] [[Flex Trade Timezone Fix]] 🟢 — PR #26 merged `a0abbee` (2026-11-17). Flex times are US/Eastern and are now stored as UTC; all 39 prod rows backfilled.

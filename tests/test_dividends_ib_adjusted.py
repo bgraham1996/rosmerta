@@ -65,6 +65,23 @@ def test_special_flag_and_monthly_frequency():
     assert {r.frequency for r in recs.values()} == {'monthly'}
 
 
+@pytest.mark.parametrize('amounts,expected', [
+    # COST-style one-off between regular payments
+    ([1.0, 1.0, 1.1, 10.0, 1.1, 1.1, 1.2], [0, 0, 0, 1, 0, 0, 0]),
+    # NVDA-style step-up that persists: regular, not special
+    ([0.01] * 6 + [0.25, 0.25], [0] * 8),
+    # IBKR-style long growth (raises over the years)
+    [[0.025] * 8 + [0.0625] * 4 + [0.08] * 6, [0] * 18],
+    # special as the very first payment (VST 2016) and as the newest
+    ([2.32, 0.075, 0.075, 0.075, 0.075], [1, 0, 0, 0, 0]),
+    ([0.43, 0.43, 0.43, 0.43, 2.0], [0, 0, 0, 0, 1]),
+    # too few payments to judge
+    ([0.1, 2.0], [0, 0]),
+])
+def test_special_flags(amounts, expected):
+    assert d._special_flags(amounts) == [bool(x) for x in expected]
+
+
 @pytest.mark.parametrize('value,expected', [
     (0.42997, '0.430'), (0.43011, '0.430'), (0.4849, '0.485'),
     (0.5903, '0.5903'), (2.13221, '2.1322'),

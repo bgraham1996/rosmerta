@@ -1,13 +1,13 @@
 ---
 FileType: 🚥 Dev Item
 Type: Chore
-Status: In Progress
+Status: Done
 Priority: 🔴
 Bucket: data-quality
 Cycle: "3"
 DependsOn: EDGAR fundamentals extraction fixes
 StartDate: 2026-11-12
-EndDate:
+EndDate: 2026-11-18
 tags:
 ---
 > [!warning] Found by [[Full codebase sanity check and test audit]] on 2026-11-12; pulled into [[Cycle 3]] the same day.
@@ -27,8 +27,8 @@ In the current prod DB (`rosmerta__prod` on localhost), **`fundamentals` and `di
 - [x] ~~Otherwise re-fetch~~ fundamentals done (84/100, see above). Dividends → **parked**, see [[Dividends source and fetcher fixes]]. Original plan: `bulk fundamentals --list core` (EDGAR, no IB needed; 10 req/s, `email` User-Agent in `.env`) and `bulk dividends --list core` (EDGAR with IB fallback for ADRs).
 - [x] Spot-check a few tickers against EDGAR; confirm the watchlist overview shows net income. → AAPL checked; overview 83/100.
 - [x] Re-run GEHC/AMZN after [[EDGAR fundamentals extraction fixes]] → done 2026-11-17 via [[Clean up and re-fetch corrected fundamentals]] (GEHC now present: 85/100). APGE/DOMO are not in SEC data (likely delisted) and were dropped from `core` 2026-11-17 along with ABB, so coverage is **85/97**.
-- [ ] Load dividends: **un-parked 2026-11-18**, source chosen (IB-derived); load `core` once [[Dividends source and fetcher fixes]] merges.
-- [ ] Note: the `dividends` watchlist the code auto-populates (and `market_test.py` targets) doesn't exist in prod yet; a dividends run recreates it.
+- [x] Load dividends → done 2026-11-18 via [[Dividends source and fetcher fixes]]: 2,677 `ib_adjusted` rows for 82 of 97 `core` stocks (2016-11-22 → 2026-11-16); the other 15 pay no dividend. PFE 2025 = 4 × $0.43, KO 2025 = $2.04.
+- [x] The `dividends` watchlist now exists in prod (82 stocks, auto-populated by the load).
 
 # Dependencies
 ##### Depends on
