@@ -1,15 +1,17 @@
 ---
 FileType: 🚥 Dev Item
 Type: Feature
-Status: Backlog
+Status: Planned
 Priority: 🟡
 Bucket: ingestion
-Cycle:
+Cycle: "4"
 DependsOn: 
 StartDate: 
 EndDate: 
 tags: 
 ---
+> [!info] Scheduled into [[Cycle 4]] on 2026-11-18 as the prerequisite for [[Scheduled data refresh]]: the manual Gateway login is what blocks unattended jobs.
+
 > [!note] Your item — drafted from the title. Edit freely. Migrated to the new schema + Cycle 2.
 
 # Summary
@@ -30,4 +32,4 @@ Run the IB **Gateway headless** (no manual desktop login) so scheduled/automated
 ##### Relevant Docs
 - `price_retrival/ib_api.py` (`127.0.0.1:4001`), Architecture Vision → containerisation, [[Move PostgreSQL Local]].
 ##### Prerequisite for
-- [[Data Refresh Workflows]] on a schedule and [[Live data streaming]] running unattended.
+- [[Scheduled data refresh]] / [[Data Refresh Workflows]] on a schedule and [[Live data streaming]] running unattended.

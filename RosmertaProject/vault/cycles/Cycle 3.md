@@ -38,7 +38,7 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 - [ ] [[Incremental Fetch and Dedup]] 🔴 — CLI paths, fundamentals skip, `fetch_log`, ticker dedupe.
 
 ## Data (pulled in 2026-11-12 from the sanity check):
-- [ ] [[Refresh stale equity prices and trades]] 🔴 — **in progress**: prices current (97/97, 2026-11-12); trades loaded 2026-11-17 (`trade` 21 → 39, to 2026-11-04); ABB/APGE/DOMO dropped from `core` 2026-11-17 (100 → 97). Left: a refresh cadence.
+- [x] [[Refresh stale equity prices and trades]] 🔴: **done 2026-11-18**. prices current (97/97, 2026-11-12); trades loaded 2026-11-17 (`trade` 21 → 39, to 2026-11-04); ABB/APGE/DOMO dropped from `core` 2026-11-17 (100 → 97). The refresh cadence moved to [[Cycle 4]] as [[Scheduled data refresh]] (with [[Headless IB]]).
 - [ ] [[Restore fundamentals and dividends in prod]] 🔴 — **in progress**: fundamentals restored 2026-11-12 and corrected 2026-11-17 (85/97 stocks); dividends **parked** (IB has no dividend history for this account, error 10358).
   - [x] [[EDGAR fundamentals extraction fixes]] 🟡 — code merged (PR #23). APGE/DOMO dropped from `core` 2026-11-17.
   - [x] [[Clean up and re-fetch corrected fundamentals]] 🟡 — done 2026-11-17: backed up, deleted the 63 stale FY rows, re-fetched 8 tickers, all checks pass.
