@@ -203,19 +203,15 @@ def fetch_fundamentals(ticker, start, end, no_db):
               help='End date (YYYY-MM-DD). Omit for up to present.')
 @click.option('--exchange', default='SMART', help='IB exchange routing (default: SMART)')
 @click.option('--currency', default='USD', help='Contract currency (default: USD)')
-@click.option('--no-fallback', is_flag=True,
-              help='Disable IB fallback when EDGAR returns no data')
 @click.option('--no-db', is_flag=True, help='Skip database storage')
-def fetch_dividends(ticker, start, end, exchange, currency, no_fallback, no_db):
-    """Fetch dividend history from EDGAR (with IB fallback for ADRs).
+def fetch_dividends(ticker, start, end, exchange, currency, no_db):
+    """Fetch dividend history (ex-date + amount) from IB.
  
-    Routing: tickers with a CIK go to EDGAR; ADRs/foreign tickers go to IB.
-    EDGAR rows have approximate ex-dates (period end); IB rows have real
-    ex-dates and may flag specials. Use --no-fallback to skip the IB step
-    when EDGAR returns nothing.
+    Derived from IB's daily adjusted vs unadjusted closes (default: last
+    10 years). Needs IB Gateway. No pay or declaration dates.
  
     Example: rosmerta fetch dividends PFE --start 2018-01-01
-    Example: rosmerta fetch dividends NVO --currency DKK
+    Example: rosmerta fetch dividends NVO --no-db
     """
     from price_retrival.dividends_api import get_dividends
  
@@ -232,17 +228,19 @@ def fetch_dividends(ticker, start, end, exchange, currency, no_fallback, no_db):
  
     db_config = get_db_config(no_db)
  
-    records, source = get_dividends(
-        ticker=ticker,
-        db_config=db_config,
-        user_agent=email,
-        start_date=start,
-        end_date=end,
-        exchange=exchange,
-        currency=currency,
-        save_to_db=not no_db,
-        try_ib_fallback=not no_fallback,
-    )
+    try:
+        records, source = get_dividends(
+            ticker=ticker,
+            db_config=db_config,
+            start_date=start,
+            end_date=end,
+            exchange=exchange,
+            currency=currency,
+            save_to_db=not no_db,
+        )
+    except Exception as e:
+        console.print(f"[red]Dividend fetch failed for {ticker}: {e}[/red]")
+        raise SystemExit(1)
  
     if not records:
         console.print(f"[red]No dividend data found for {ticker}[/red]")
@@ -250,9 +248,7 @@ def fetch_dividends(ticker, start, end, exchange, currency, no_fallback, no_db):
  
     # Source label
     source_label = {
-        'edgar': '[green]EDGAR[/green]',
-        'ib': '[blue]IB[/blue]',
-        'ib_fallback': '[yellow]IB (EDGAR fallback)[/yellow]',
+        'ib_adjusted': '[blue]IB (derived from adjusted prices)[/blue]',
     }.get(source, source)
     console.print(f"  Source: {source_label}")
  
@@ -494,16 +490,14 @@ def bulk_fundamentals(list_name, start, end, dry_run, force, max_age):
 @click.option('--end', '-e', default=None,
               help='End date (YYYY-MM-DD). Omit for up to present.')
 @click.option('--exchange', default='SMART', help='IB exchange routing (default: SMART)')
-@click.option('--no-fallback', is_flag=True,
-              help='Disable IB fallback when EDGAR returns no data')
 @click.option('--delay', default=1, type=int,
               help='Seconds between tickers (default: 1)')
 @click.option('--dry-run', is_flag=True, default=False,
               help='Show what would be fetched without fetching')
-def bulk_dividends(list_name, start, end, exchange, no_fallback, delay, dry_run):
-    """Fetch dividend history for all stocks in a watchlist.
+def bulk_dividends(list_name, start, end, exchange, delay, dry_run):
+    """Fetch dividend history from IB for all stocks in a watchlist.
  
-    Each ticker is routed via the EDGAR/IB dispatcher. Tickers that return
+    Each ticker is derived from IB's adjusted prices. Tickers that return
     any dividend records are added to the 'dividends' watchlist
     automatically (duplicates are ignored).
  
@@ -511,8 +505,7 @@ def bulk_dividends(list_name, start, end, exchange, no_fallback, delay, dry_run)
     Example: rosmerta bulk dividends --list core --start 2018-01-01
     """
     _run_bulk_fetch(list_name, start, end, dry_run, 'dividends',
-                    exchange=exchange, delay=delay,
-                    try_ib_fallback=not no_fallback)
+                    exchange=exchange, delay=delay)
  
 
 
@@ -838,7 +831,7 @@ def _show_results(results, list_name, record_label='Records'):
 
 def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
                     exchange='SMART', delay=2, force=False, max_age_days=30,
-                    try_ib_fallback=True, bar_size='1 hour'):
+                    bar_size='1 hour'):
     """Shared implementation for bulk price, fundamentals, and dividends."""
     from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, MofNCompleteColumn
     from price_retrival.bulk_fetch import (
@@ -927,11 +920,9 @@ def _run_bulk_fetch(list_name, start, end, dry_run, fetch_type,
             results = bulk_fetch_dividends(
                 tickers=tickers,
                 db_config=db_config,
-                user_agent=email,
                 start=start,
                 end=end,
                 exchange=exchange,
-                try_ib_fallback=try_ib_fallback,
                 delay=delay,
                 on_ticker_start=on_start,
                 on_ticker_complete=on_complete,

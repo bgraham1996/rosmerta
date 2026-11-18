@@ -336,42 +336,37 @@ def bulk_fetch_fundamentals(
 def bulk_fetch_dividends(
     tickers,
     db_config,
-    user_agent,
     start=None,
     end=None,
     exchange='SMART',
     ib_host='127.0.0.1',
     ib_port=4001,
-    try_ib_fallback=True,
     delay=1,
     on_ticker_start=None,
     on_ticker_complete=None,
 ):
     """
-    Fetch dividend records for a list of tickers using the EDGAR/IB dispatcher.
+    Fetch dividend records from IB (derived from adjusted prices) for a
+    list of tickers.
 
-    No freshness check: dividends are append-only and small, and re-fetching
-    is cheap. Each ticker is routed independently (EDGAR for US, IB for ADRs,
-    IB fallback on EDGAR empty).
+    No freshness check: the history is small, re-fetching is cheap (~2 s a
+    ticker) and each fetch replaces the ticker's earlier derived rows.
 
     Args:
         tickers: list of dicts with 'symbol', 'exchange', 'currency'
         db_config: PostgreSQL connection dict
-        user_agent: SEC-required user agent string
         start: start date string (YYYY-MM-DD) or None
         end: end date string (YYYY-MM-DD) or None
         exchange: default IB exchange routing
         ib_host: IB Gateway host
         ib_port: IB Gateway port
-        try_ib_fallback: if True, fall back to IB on empty EDGAR result
-        delay: seconds between tickers (lower than IB-only ops because most
-               calls hit EDGAR which has its own rate limiting)
+        delay: seconds between tickers
         on_ticker_start: optional callback(index, symbol)
         on_ticker_complete: optional callback(index, result)
 
     Returns:
         list of FetchResult (with `error` field used to carry the source
-        used: 'edgar', 'ib', 'ib_fallback', or error message on failure)
+        used, 'ib_adjusted', or the error message on failure)
     """
     from price_retrival.dividends_api import get_dividends
 
@@ -389,7 +384,6 @@ def bulk_fetch_dividends(
             records, source = get_dividends(
                 ticker=symbol,
                 db_config=db_config,
-                user_agent=user_agent,
                 start_date=start,
                 end_date=end,
                 exchange=ticker_exchange,
@@ -397,7 +391,6 @@ def bulk_fetch_dividends(
                 ib_host=ib_host,
                 ib_port=ib_port,
                 save_to_db=True,
-                try_ib_fallback=try_ib_fallback,
             )
 
             if records:

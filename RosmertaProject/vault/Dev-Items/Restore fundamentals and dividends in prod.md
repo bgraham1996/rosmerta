@@ -27,7 +27,7 @@ In the current prod DB (`rosmerta__prod` on localhost), **`fundamentals` and `di
 - [x] ~~Otherwise re-fetch~~ fundamentals done (84/100, see above). Dividends → **parked**, see [[Dividends source and fetcher fixes]]. Original plan: `bulk fundamentals --list core` (EDGAR, no IB needed; 10 req/s, `email` User-Agent in `.env`) and `bulk dividends --list core` (EDGAR with IB fallback for ADRs).
 - [x] Spot-check a few tickers against EDGAR; confirm the watchlist overview shows net income. → AAPL checked; overview 83/100.
 - [x] Re-run GEHC/AMZN after [[EDGAR fundamentals extraction fixes]] → done 2026-11-17 via [[Clean up and re-fetch corrected fundamentals]] (GEHC now present: 85/100). APGE/DOMO are not in SEC data (likely delisted) and were dropped from `core` 2026-11-17 along with ABB, so coverage is **85/97**.
-- [ ] ~~Load dividends~~ **parked**: un-park via [[Dividends source and fetcher fixes]] (pick a source first).
+- [ ] Load dividends: **un-parked 2026-11-18**, source chosen (IB-derived); load `core` once [[Dividends source and fetcher fixes]] merges.
 - [ ] Note: the `dividends` watchlist the code auto-populates (and `market_test.py` targets) doesn't exist in prod yet; a dividends run recreates it.
 
 # Dependencies
