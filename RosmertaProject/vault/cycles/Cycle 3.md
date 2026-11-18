@@ -39,13 +39,14 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 
 ## Data (pulled in 2026-11-12 from the sanity check):
 - [x] [[Refresh stale equity prices and trades]] 🔴: **done 2026-11-18**. prices current (97/97, 2026-11-12); trades loaded 2026-11-17 (`trade` 21 → 39, to 2026-11-04); ABB/APGE/DOMO dropped from `core` 2026-11-17 (100 → 97). The refresh cadence moved to [[Cycle 4]] as [[Scheduled data refresh]] (with [[Headless IB]]).
-- [ ] [[Restore fundamentals and dividends in prod]] 🔴 — **in progress**: fundamentals restored 2026-11-12 and corrected 2026-11-17 (85/97 stocks); dividends **parked** (IB has no dividend history for this account, error 10358).
+- [ ] [[Restore fundamentals and dividends in prod]] 🔴 — **in progress**: fundamentals restored 2026-11-12 and corrected 2026-11-17 (85/97 stocks); dividends **un-parked 2026-11-18**: IB-derived history built (see below), load pending.
   - [x] [[EDGAR fundamentals extraction fixes]] 🟡 — code merged (PR #23). APGE/DOMO dropped from `core` 2026-11-17.
   - [x] [[Clean up and re-fetch corrected fundamentals]] 🟡 — done 2026-11-17: backed up, deleted the 63 stale FY rows, re-fetched 8 tickers, all checks pass.
+  - [ ] [[Dividends source and fetcher fixes]] 🔴 — pulled in 2026-11-18. Source chosen: **IB only**, ex-dates + amounts derived from daily adjusted vs unadjusted closes (`source='ib_adjusted'`). Code in a PR; then delete the 56 bad PFE EDGAR rows and `bulk dividends --list core`.
 
 ## Portfolio:
 - [x] [[Flex Trade Timezone Fix]] 🟢 — PR #26 merged `a0abbee` (2026-11-17). Flex times are US/Eastern and are now stored as UTC; all 39 prod rows backfilled.
-- [ ] [[Trades and Portfolio Analytics]] 🟡 — carried from [[Cycle 1]].
+- [ ] [[Trades and Portfolio Analytics]] 🟡 — carried from [[Cycle 1]]. Design done (PR #32); **now depends on [[Dividends source and fetcher fixes]]** (dividends are part of the return; design Decision 6).
 
 ## Done:
 - [x] [[Full codebase sanity check and test audit]] — 2026-11-12. Fixed the `Market` crash (PR #18) and the trades/dividends stock lookup (PR #21); IB- and DB-side passes done.

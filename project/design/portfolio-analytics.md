@@ -10,7 +10,8 @@ item: `[[Trades and Portfolio Analytics]]` (Cycle 3, target V1.0.0.2).
 trades to 2026-11-04, stored as UTC (`[[Flex Trade Timezone Fix]]`). Running the draft's FIFO
 algorithm over them found **an issue the draft missed**: the book has *opening positions* that
 predate the trade data (Decision 3). Prices now live in `price_bars` (bar-size aware), not
-`price_hourly`, and dividends are parked.
+`price_hourly`. Dividends are no longer parked: per-share history now comes from IB (Decision 6),
+and portfolio work depends on it, since dividends are a real part of the return on this book.
 
 ## Goals
 
@@ -18,6 +19,8 @@ predate the trade data (Decision 3). Prices now live in `price_bars` (bar-size a
 - **Realized P&L** per closed lot and in aggregate; **unrealized P&L** on open holdings.
 - **Holding-period** and per-trade outcome stats (win rate, avg gain/loss, duration): the same
   raw material the forward-gain / weekly-behaviour work uses, but keyed to real entries.
+- **Dividend income** per holding and **total return** (price + dividends), so dividend payers
+  (KO, PFE, ABT, BMY, GILD, MDT in this book) aren't understated.
 - A read-only analysis surface matching `data_models` (`Asset`/`Market`), plus CLI and Dash.
 
 ## Non-goals (first cut)
@@ -25,8 +28,7 @@ predate the trade data (Decision 3). Prices now live in `price_bars` (bar-size a
 - **Shorting.** The trader is **long-only** (buy then sell, never short). Matching assumes it.
 - **Multi-currency.** Ingest skips CASH/forex; every STK trade so far is USD. Single-currency USD book.
 - **Tax-lot reporting / wash sales.** FIFO gives tax-lot-like semantics, but this is an analysis tool.
-- **Dividends in total return.** Parked: IB has no dividend history for this account (error
-  10358) and EDGAR dividends aren't per-account. Revisit with `[[Dividends source and fetcher fixes]]`.
+- **Dividend reinvestment / DRIP lots.** Dividends are cash income, not new lots.
 
 ## What the real data looks like (probe, 2026-11-18)
 
@@ -117,6 +119,25 @@ portal change now so commissions start accumulating, and net them in phase 3.
   missing bars). The refresh workflows, and later `[[Scheduled data refresh]]`, fetch it alongside
   `core`. The analysis layer itself never fetches.
 
+## Decision 6: Dividends → entitled from IB history first, received from Flex later
+
+Two different things, from two sources:
+
+- **Entitled (per-share history × shares held).** `dividends` rows with `source='ib_adjusted'`,
+  derived from IB's daily adjusted vs unadjusted closes (`price_retrival/dividends_api.py`):
+  ex-date and cash amount per share, no pay date. For each ex-date, shares held = open FIFO lot
+  quantity at the *close of the day before* the ex-date (bought before ex-date → entitled; sold
+  before ex-date → not). Entitled income = Σ(shares × amount), attributed to the lots open at
+  the time, so a closed round-trip carries the dividends it collected.
+- **Received (cash).** IB Flex **Cash Transactions** (dividends, withholding tax, payments in
+  lieu) give the actual cash, pay date and the 15% US withholding. Needs that section added to
+  the Flex query in the IB portal (your action) plus an ingest; until then income is **gross of
+  withholding** and labelled so.
+
+Recommendation: ship entitled dividends with the engine (phase 2) and reconcile against Flex cash
+once it's ingested (phase 3). Orphan sells (Decision 3) mean early-2026 holdings are incomplete,
+so dividends on those positions are understated until the opening positions are fixed.
+
 ## The FIFO matching algorithm
 
 ```
@@ -151,7 +172,10 @@ for t in opening_lots_as_buys + trades, ordered by (dt, trade_id):
 - **Realized (slice)** = `qty × (sell − buy)`. Aggregate by symbol, by month, or total.
 - **Unrealized (open lot)** = `qty × (last_close − buy)`; NaN when there's no price.
 - **Return %** (slice) = `sell / buy − 1`; the capital-weighted aggregate is Σrealized / Σ(qty·buy).
-- **Total P&L** = realized + unrealized. All **gross** until Decision 4 lands; dividends excluded.
+- **Dividend income** (lot) = Σ over ex-dates while the lot was open of `qty × amount`
+  (Decision 6); gross of withholding until Flex cash is ingested.
+- **Total P&L** = realized + unrealized + dividend income. All **gross** until Decision 4 lands.
+- **Total return %** (slice) = `(sell − buy + dividends per share) / buy`.
 - Every result carries `synthetic_open` and an `unmatched` list, so incomplete numbers are visible.
 
 ## `Portfolio` class (mirrors `data_models.Asset`/`Market`)
@@ -223,14 +247,18 @@ fresh-create bundle under `[[Reconcile DB schema - init migrations and scripts]]
    *Needs you:* change the query period in the IB portal, and later export Open Positions if gaps remain.
 4. **Fees:** gross first. *Needs you:* add `ibCommission` to the Flex query now.
 5. **Held-but-unpriced symbols:** a `holdings` watchlist fetched by the refresh workflows. Recommended.
+6. **Dividends:** entitled income from IB-derived history in phase 2; Flex cash (and withholding)
+   in phase 3. *Needs you:* add Cash Transactions to the Flex query.
 
 ## Phasing
 
 1. **Engine:** `Portfolio` + FIFO + realized P&L + open holdings + unmatched reporting, with tests.
    Re-ingest with the widened Flex period first, if Decision 3A goes ahead.
-2. **Prices and stats:** unrealized from `price_bars`, `get_performance_stats`, `holdings`
-   watchlist; CLI `portfolio --db` with IB reconciliation.
-3. **Completeness:** `opening_lot` for any remaining orphans; commissions → net P&L.
+2. **Prices, dividends and stats:** unrealized from `price_bars`, entitled dividend income and
+   total return (Decision 6), `get_performance_stats`, `holdings` watchlist; CLI `portfolio --db`
+   with IB reconciliation. Needs `bulk dividends --list core` (and `holdings`) loaded first.
+3. **Completeness:** `opening_lot` for any remaining orphans; commissions → net P&L; Flex Cash
+   Transactions → dividends received and withholding.
 4. **Dash view**; optional `build positions` materialization.
 
 ## Links

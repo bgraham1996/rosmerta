@@ -60,8 +60,8 @@ All commands accept `--no-db` (skip persistence) where persistence applies. Comm
 
 - `fetch price <TICKER> -s <date> -e <date>` — hourly OHLCV bars from IB.
 - `fetch fundamentals <TICKER> [-s -e]` — financial statements from EDGAR (omit dates for all).
-- `fetch dividends <TICKER> [-s -e]` — dividends via EDGAR with **IB fallback** for ADRs/foreign
-  tickers (`--no-fallback` to disable).
+- `fetch dividends <TICKER> [-s -e]` — dividend ex-dates + amounts from IB, derived from daily
+  adjusted vs unadjusted closes (default last 10 years; needs IB Gateway).
 - `portfolio` — current IB positions with P&L (no DB).
 - `bulk price|fundamentals|dividends --list <WATCHLIST>` — iterate a watchlist. Supports
   `--dry-run`; `bulk fundamentals` adds freshness skipping (`--max-age`, `--force`).
@@ -97,10 +97,13 @@ commands consistent with this lazy-import + Rich-output style.
   by expiry) — the only model function built now; front-month/roll/aggregation are deferred.
 - `edgar_api.py` — `EdgarFundamentalsFetcher`; `XBRL_TAG_MAP` maps DB columns to ordered lists of
   US-GAAP XBRL tags (companies use different tags for the same concept — first match wins).
-- `dividends_api.py` — `EdgarDividendsFetcher` + `IBDividendsFetcher`, dispatched by the
-  `get_dividends(...)` function: tickers with a CIK route to EDGAR, ADRs/foreign route to IB.
-  Returns `(records, source)` where source ∈ `edgar`/`ib`/`ib_fallback`. Successful tickers are
-  auto-added to the `dividends` watchlist.
+- `dividends_api.py` — `get_dividends(...)` fetches from `IBDividendsFetcher`, which pulls daily
+  `TRADES` and `ADJUSTED_LAST` bars and derives ex-dates + cash amounts with the pure
+  `derive_dividends_from_bars` (`source='ib_adjusted'`; no pay/declaration dates). IB's
+  fundamentals feed is refused for this account (error 10358). Each store replaces the ticker's
+  earlier `ib_adjusted` rows in the fetched window; tickers with records join the `dividends`
+  watchlist. `EdgarDividendsFetcher` is cross-check only (EDGAR gives period totals, not payments)
+  and is never stored. Dividends actually *received* come from Flex Cash Transactions (not built).
 - `bulk_fetch.py` — watchlist resolution (`get_watchlist_tickers`, `get_available_lists`),
   freshness (`get_last_fetch_times`), and `bulk_fetch_{prices,fundamentals,dividends}`. Each
   returns a list of `FetchResult` (`status` ∈ `success`/`empty`/`skipped`/`error`). **Bulk price

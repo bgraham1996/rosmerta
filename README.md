@@ -85,11 +85,11 @@ uv run main.py fetch fundamentals MSFT
 
 ### Fetch Dividends
 ```bash
-# EDGAR with automatic IB fallback for ADRs/foreign tickers
+# Ex-dates + amounts derived from IB adjusted prices (needs IB Gateway; default last 10 years)
 uv run main.py fetch dividends KO
 
-# Disable the IB fallback
-uv run main.py fetch dividends KO --no-fallback
+# Preview without storing
+uv run main.py fetch dividends KO --start 2023-01-01 --no-db
 ```
 
 ### Portfolio Management
@@ -124,7 +124,7 @@ uv run main.py dashboard --debug
 ### Data Fetching
 - `fetch price <TICKER>` - Fetch OHLCV bars from IB (`--bar-size`, default `1 hour`)
 - `fetch fundamentals <TICKER>` - Fetch SEC EDGAR financial statements
-- `fetch dividends <TICKER>` - Fetch dividends (EDGAR, with IB fallback)
+- `fetch dividends <TICKER>` - Fetch dividend history from IB (derived from adjusted prices)
 
 ### Portfolio
 - `portfolio` - Show current IB positions with P&L

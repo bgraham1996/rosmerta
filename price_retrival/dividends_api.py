@@ -1,35 +1,29 @@
 """
 Dividends Data Fetcher
 ======================
-Retrieves dividend history for stocks, with EDGAR as the primary source
-and IB as a fallback for ADRs/foreign tickers and when EDGAR returns nothing.
+Retrieves per-share dividend history (ex-date + amount) for stocks from IB.
 
 Architecture
 ------------
-- `EdgarDividendsFetcher` — parses XBRL `companyfacts` for the four standard
-  dividend concepts. Cross-validates per-share × shares_outstanding against
-  total cash paid, with 5%/20% tolerance bands.
-- `IBDividendsFetcher` — uses `reqFundamentalData(contract, 'ReportsFinSummary')`
-  and parses the resulting XML for the `<Dividends>` block.
-- `get_dividends(...)` — public dispatcher. Routes by CIK existence; falls back
-  to IB on empty EDGAR result. Auto-populates the 'dividends' watchlist when
-  any records are returned.
+- `derive_dividends_from_bars` — pure function: derives ex-dates and cash
+  amounts from IB's daily TRADES vs ADJUSTED_LAST closes (see the section
+  comment below for the maths and its limits).
+- `IBDividendsFetcher` — pulls both daily series from IB and derives the
+  records (`source='ib_adjusted'`). IB's fundamentals feed is refused for this
+  account (error 10358), so that route is gone.
+- `get_dividends(...)` — public entry point: fetch from IB, optionally store,
+  and auto-populate the 'dividends' watchlist.
+- `EdgarDividendsFetcher` — kept for cross-checks only. EDGAR XBRL gives
+  fiscal-period totals (often year-to-date) dated at the period end, not
+  payments, so its output is never stored.
 
-Notes on EDGAR limitations
---------------------------
-EDGAR XBRL gives us the period (start/end) the dividend belongs to and the
-filing date — not the actual ex-date. We use the period `end` as a proxy for
-`ex_date` and flag the row with `source='edgar'` so downstream code can
-distinguish it from IB-sourced rows with real ex-dates.
-
-For dividend-capture trades, prefer rows with `source='ib'`.
+Dividends actually *received* (cash, withholding tax, pay dates) belong to
+the IB Flex Cash Transactions section, not this module.
 """
 
 from __future__ import annotations
 
 import logging
-import time
-import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta
 from decimal import Decimal
@@ -77,7 +71,7 @@ class DividendRecord:
     currency: str
     frequency: Optional[str]
     dividend_type: str   # 'regular', 'special', 'stock', 'liquidating'
-    source: str          # 'edgar' or 'ib'
+    source: str          # 'ib_adjusted' (stored); 'edgar' (cross-check only)
 
     def as_db_tuple(self, stock_id: int) -> tuple:
         """Convert to the tuple shape expected by the dividends INSERT."""
@@ -126,46 +120,45 @@ def _get_or_create_stock(conn, symbol: str, exchange: str = 'SMART',
         return stock_id
 
 
-def _save_dividends_to_db(conn, stock_id: int,
-                          records: list[DividendRecord]) -> int:
-    """
-    Upsert dividend records. Returns the number of rows successfully written.
+def _replace_derived_dividends(conn, stock_id: int,
+                               records: list[DividendRecord]) -> int:
+    """Store derived records, replacing earlier rows of the same source.
 
-    The unique constraint on `dividends` is (stock_id, ex_date, amount), so
-    re-fetches will hit ON CONFLICT for unchanged data. We refresh metadata
-    columns on conflict to allow late enrichment (e.g. an EDGAR row later
-    backfilled with IB's actual ex-date logic — though we'd typically dedupe
-    that case before insert).
+    Derived amounts can move by ~$0.0001 between fetches (IB re-rounds its
+    adjusted closes), and ``uq_dividend`` includes ``amount``, so a plain
+    upsert would leave near-duplicate rows. Instead, within one transaction,
+    delete this stock's rows of the same source inside the fetched ex-date
+    window and insert the fresh set. Rows from other sources are untouched.
     """
     if not records:
         return 0
-
-    rows = [r.as_db_tuple(stock_id) for r in records]
-
+    source = records[0].source
+    lo = min(r.ex_date for r in records)
+    hi = max(r.ex_date for r in records)
     insert_sql = """
         INSERT INTO dividends
             (stock_id, ex_date, pay_date, amount, currency, frequency,
              declaration_date, record_date, dividend_type, source)
         VALUES %s
-        ON CONFLICT (stock_id, ex_date, amount)
-        DO UPDATE SET
-            pay_date         = COALESCE(EXCLUDED.pay_date, dividends.pay_date),
-            declaration_date = COALESCE(EXCLUDED.declaration_date, dividends.declaration_date),
-            record_date      = COALESCE(EXCLUDED.record_date, dividends.record_date),
-            dividend_type    = EXCLUDED.dividend_type,
-            source           = EXCLUDED.source
+        ON CONFLICT (stock_id, ex_date, amount) DO NOTHING
     """
-
     try:
         with conn.cursor() as cur:
-            execute_values(cur, insert_sql, rows)
+            cur.execute(
+                """DELETE FROM dividends
+                   WHERE stock_id = %s AND source = %s
+                     AND ex_date BETWEEN %s AND %s""",
+                (stock_id, source, lo, hi),
+            )
+            execute_values(cur, insert_sql,
+                           [r.as_db_tuple(stock_id) for r in records])
         conn.commit()
-        logger.info(f"Saved {len(rows)} dividend records for stock_id={stock_id}")
-        return len(rows)
+        logger.info(f"Stored {len(records)} {source} dividends for stock_id={stock_id}")
+        return len(records)
     except Exception as e:
         conn.rollback()
         logger.error(f"Error saving dividends to DB: {e}")
-        return 0
+        raise
 
 
 def _add_to_dividends_watchlist(conn, stock_id: int) -> bool:
@@ -295,7 +288,8 @@ class EdgarDividendsFetcher:
 
     # -- Connection lifecycle ---------------------------------
     def __enter__(self):
-        self.db_conn = psycopg2.connect(**self.db_config)
+        if self.db_config:
+            self.db_conn = psycopg2.connect(**self.db_config)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -460,8 +454,9 @@ class EdgarDividendsFetcher:
         end_d = (datetime.strptime(end_date, '%Y-%m-%d').date()
                  if end_date else None)
 
-        # Look up stock_id once for cross-validation queries
-        stock_id = _get_or_create_stock(self.db_conn, ticker)
+        # Cross-validation needs shares_outstanding from the DB (optional)
+        stock_id = (_get_or_create_stock(self.db_conn, ticker)
+                    if self.db_conn else None)
 
         records = []
         for ex_date, ps in sorted(per_share_data.items()):
@@ -474,9 +469,8 @@ class EdgarDividendsFetcher:
 
             # Cross-validate
             total_cash = total_cash_lookup.get(ex_date)
-            shares = _get_latest_shares_outstanding(
-                self.db_conn, stock_id, ex_date
-            )
+            shares = (_get_latest_shares_outstanding(
+                self.db_conn, stock_id, ex_date) if stock_id else None)
             _cross_validate(ticker, ex_date, ps['amount'], total_cash, shares)
 
             records.append(DividendRecord(
@@ -505,24 +499,143 @@ class EdgarDividendsFetcher:
 
 
 # ============================================================
+# Dividends derived from IB adjusted prices
+# ============================================================
+# IB refuses `reqFundamentalData` for this account (error 10358, "Fundamentals
+# data is not allowed"), so dividend history can't come from ReportsFinSummary.
+# It does serve daily `ADJUSTED_LAST` bars, which are TRADES bars adjusted for
+# dividends (both series are already split-adjusted). The ratio
+#
+#     f(d) = adjusted_close(d) / raw_close(d)
+#
+# is flat between dividends and steps up on each ex-date. With
+# step = f(d) / f(d-1), the cash dividend is
+#
+#     dividend = raw_close(d-1) * (1 - 1 / step)
+#
+# Checked against known payouts (PFE, KO, MRK, ABBV, AAPL, NVO, O, BNTX, AMZN):
+# ex-dates match and amounts land within ±$0.0001. Limits: no pay, record or
+# declaration dates, and amounts before a split or spin-off are in today's
+# share terms (as total-return maths wants).
+
+#: A step smaller than this is float noise in IB's adjusted closes.
+MIN_STEP = 2e-5
+#: Ignore implied dividends under half a cent (also noise).
+MIN_AMOUNT = 0.005
+#: Snap to a 3-decimal amount when within this distance (0.4299 -> 0.430).
+SNAP_TOLERANCE = 0.00015
+#: An amount this many times the series median is flagged 'special'.
+SPECIAL_MULTIPLE = 3.0
+
+#: Median gap (days) between ex-dates -> frequency label.
+_FREQUENCY_BANDS = [
+    (45, 'monthly'),
+    (135, 'quarterly'),
+    (270, 'semi-annual'),
+    (500, 'annual'),
+]
+
+
+def _snap_amount(value: float) -> Decimal:
+    """Round to 4 dp, snapping to 3 dp when the gap is only rounding noise."""
+    three = round(value, 3)
+    if abs(value - three) <= SNAP_TOLERANCE:
+        return Decimal(f"{three:.3f}")
+    return Decimal(f"{value:.4f}")
+
+
+def _infer_frequency(ex_dates: list[date]) -> Optional[str]:
+    """Label a series by the median gap between consecutive ex-dates."""
+    if len(ex_dates) < 2:
+        return None
+    gaps = sorted((b - a).days for a, b in zip(ex_dates, ex_dates[1:]))
+    median = gaps[len(gaps) // 2]
+    for limit, label in _FREQUENCY_BANDS:
+        if median <= limit:
+            return label
+    return 'irregular'
+
+
+def _to_date(value) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return datetime.strptime(str(value)[:10], '%Y-%m-%d').date()
+
+
+def derive_dividends_from_bars(raw_closes, adjusted_closes,
+                               currency: str = 'USD') -> list[DividendRecord]:
+    """Derive cash dividends from unadjusted vs dividend-adjusted daily closes.
+
+    Args:
+        raw_closes: iterable of ``(date, close)`` from TRADES daily bars.
+        adjusted_closes: iterable of ``(date, close)`` from ADJUSTED_LAST bars.
+        currency: currency of the contract (amounts are in this currency).
+
+    Returns:
+        ``DividendRecord`` list ordered by ex-date, ``source='ib_adjusted'``.
+        Only dates present in both series are used.
+    """
+    raw = {_to_date(d): float(c) for d, c in raw_closes if c}
+    adj = {_to_date(d): float(c) for d, c in adjusted_closes if c}
+    days = sorted(raw.keys() & adj.keys())
+
+    events: list[tuple[date, float]] = []
+    for prev, cur in zip(days, days[1:]):
+        step = (adj[cur] / raw[cur]) / (adj[prev] / raw[prev])
+        if step - 1 <= MIN_STEP:
+            continue
+        amount = raw[prev] * (1 - 1 / step)
+        if amount >= MIN_AMOUNT:
+            events.append((cur, amount))
+
+    frequency = _infer_frequency([d for d, _ in events])
+    amounts = sorted(a for _, a in events)
+    median = amounts[len(amounts) // 2] if amounts else 0.0
+
+    records = []
+    for ex_date, amount in events:
+        special = len(events) >= 4 and amount > SPECIAL_MULTIPLE * median
+        records.append(DividendRecord(
+            ex_date=ex_date,
+            pay_date=None,
+            declaration_date=None,
+            record_date=None,
+            amount=_snap_amount(amount),
+            currency=currency,
+            frequency=frequency,
+            dividend_type='special' if special else 'regular',
+            source='ib_adjusted',
+        ))
+    return records
+
+
+def _ib_duration(start_date: Optional[str], default_years: int = 10) -> str:
+    """IB durationStr covering ``start_date`` to today (one extra year of slack)."""
+    if not start_date:
+        return f"{default_years} Y"
+    start = datetime.strptime(start_date, '%Y-%m-%d').date()
+    years = (date.today() - start).days // 365 + 1
+    return f"{max(years, 1)} Y"
+
+
+# ============================================================
 # IB fetcher
 # ============================================================
 class IBDividendsFetcher:
-    """
-    Fetches dividend history from IB via reqFundamentalData / ReportsFinSummary.
+    """Dividend history from IB, derived from adjusted vs unadjusted daily bars.
 
-    Pattern mirrors IBStockDataFetcher: connection lifecycle, qualify contract,
-    fetch, parse. Designed to be used as context manager.
+    Needs only historical-data access (no fundamentals or market-data
+    subscription). Use as a context manager.
     """
 
     def __init__(self, host: str = '127.0.0.1', port: int = 4001,
-                 client_id: int = 11, db_config: Optional[dict] = None):
+                 client_id: int = 11):
         self.host = host
         self.port = port
         self.client_id = client_id
-        self.db_config = db_config
         self.ib = None
-        self.db_conn = None
 
     # -- Connection lifecycle ---------------------------------
     def __enter__(self):
@@ -531,12 +644,9 @@ class IBDividendsFetcher:
         nest_asyncio.apply()
 
         self.ib = IB()
-        self.ib.connect(self.host, self.port,
-                        clientId=self.client_id, timeout=10)
+        self.ib.connect(self.host, self.port, clientId=self.client_id,
+                        timeout=10, readonly=True)
         logger.info(f"Connected to IB on {self.host}:{self.port}")
-
-        if self.db_config:
-            self.db_conn = psycopg2.connect(**self.db_config)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -545,13 +655,15 @@ class IBDividendsFetcher:
                 self.ib.disconnect()
         except Exception as e:
             logger.error(f"Error during IB disconnect: {e}")
-        try:
-            if self.db_conn and not self.db_conn.closed:
-                self.db_conn.close()
-        except Exception as e:
-            logger.error(f"Error closing DB connection: {e}")
 
     # -- Fetching ---------------------------------------------
+    def _daily_closes(self, contract, duration: str, what: str) -> list:
+        bars = self.ib.reqHistoricalData(
+            contract, endDateTime='', durationStr=duration,
+            barSizeSetting='1 day', whatToShow=what, useRTH=True,
+        )
+        return [(b.date, b.close) for b in bars or []]
+
     def get_dividends(
         self,
         ticker: str,
@@ -560,133 +672,42 @@ class IBDividendsFetcher:
         exchange: str = 'SMART',
         currency: str = 'USD',
     ) -> list[DividendRecord]:
-        """
-        Fetch dividend records via reqFundamentalData(ReportsFinSummary).
+        """Derive dividend records for ``ticker`` (default: last 10 years).
 
-        Returns an empty list if the contract can't be qualified or no
-        dividend block is present in the XML.
+        Returns an empty list when the stock paid no dividends in the window.
+
+        Raises:
+            RuntimeError: the contract can't be qualified or IB returned no
+                daily bars, so "no dividends" can't be told apart from "no data".
         """
         from ib_insync import Stock
 
-        contract = Stock(ticker, exchange, currency)
-        qualified = self.ib.qualifyContracts(contract)
+        qualified = self.ib.qualifyContracts(Stock(ticker, exchange, currency))
         if not qualified:
-            logger.error(f"Could not qualify contract for {ticker}")
-            return []
+            raise RuntimeError(f"Could not qualify IB contract for {ticker}")
         contract = qualified[0]
 
-        try:
-            xml_str = self.ib.reqFundamentalData(contract, 'ReportsFinSummary')
-        except Exception as e:
-            logger.error(f"reqFundamentalData failed for {ticker}: {e}")
-            return []
+        duration = _ib_duration(start_date)
+        raw = self._daily_closes(contract, duration, 'TRADES')
+        adjusted = self._daily_closes(contract, duration, 'ADJUSTED_LAST')
+        if not raw or not adjusted:
+            raise RuntimeError(
+                f"IB returned no daily bars for {ticker} "
+                f"(TRADES {len(raw)}, ADJUSTED_LAST {len(adjusted)})"
+            )
 
-        if not xml_str:
-            logger.info(f"No fundamental XML for {ticker} from IB")
-            return []
+        records = derive_dividends_from_bars(
+            raw, adjusted, currency=contract.currency or currency)
 
-        records = self._parse_dividends_xml(xml_str, currency=currency)
-
-        # Date filtering
         start_d = (datetime.strptime(start_date, '%Y-%m-%d').date()
                    if start_date else None)
         end_d = (datetime.strptime(end_date, '%Y-%m-%d').date()
                  if end_date else None)
+        records = [r for r in records
+                   if (not start_d or r.ex_date >= start_d)
+                   and (not end_d or r.ex_date <= end_d)]
 
-        filtered = []
-        for r in records:
-            if start_d and r.ex_date < start_d:
-                continue
-            if end_d and r.ex_date > end_d:
-                continue
-            filtered.append(r)
-
-        logger.info(f"Built {len(filtered)} IB dividend records for {ticker}")
-        return filtered
-
-    @staticmethod
-    def _parse_dividends_xml(xml_str: str,
-                             currency: str = 'USD') -> list[DividendRecord]:
-        """
-        Parse the ReportsFinSummary XML for dividend entries.
-
-        Structure (approximate):
-            <ReportFinancialSummary>
-              <Dividends>
-                <Dividend type="..." exDate="YYYY-MM-DD" recordDate="..."
-                          payDate="..." declarationDate="..." currency="...">
-                    <amount>X.XX</amount>
-                </Dividend>
-                ...
-              </Dividends>
-            </ReportFinancialSummary>
-
-        Real-world XML varies — we handle the common cases and fall back
-        gracefully where elements are absent.
-        """
-        records: list[DividendRecord] = []
-        try:
-            root = ET.fromstring(xml_str)
-        except ET.ParseError as e:
-            logger.error(f"Failed to parse IB fundamentals XML: {e}")
-            return records
-
-        # IB nests dividends in different shapes depending on report version.
-        # Find any <Dividend> elements regardless of ancestor.
-        for div in root.iter('Dividend'):
-            try:
-                ex_date_str = div.get('exDate') or div.findtext('exDate')
-                if not ex_date_str:
-                    continue
-                ex_date = datetime.strptime(ex_date_str, '%Y-%m-%d').date()
-
-                # Amount can be on attribute or inner text
-                amount_str = (
-                    div.get('value')
-                    or div.findtext('amount')
-                    or (div.text.strip() if div.text else None)
-                )
-                if not amount_str:
-                    continue
-                amount = Decimal(amount_str)
-                if amount == 0:
-                    continue
-
-                dt_attr = (div.get('type') or '').lower()
-                if 'special' in dt_attr or 'extra' in dt_attr:
-                    dividend_type = 'special'
-                elif 'stock' in dt_attr:
-                    dividend_type = 'stock'
-                elif 'liquidat' in dt_attr:
-                    dividend_type = 'liquidating'
-                else:
-                    dividend_type = 'regular'
-
-                pay_date_str = div.get('payDate') or div.findtext('payDate')
-                rec_date_str = div.get('recordDate') or div.findtext('recordDate')
-                dec_date_str = (
-                    div.get('declarationDate')
-                    or div.findtext('declarationDate')
-                )
-
-                records.append(DividendRecord(
-                    ex_date=ex_date,
-                    pay_date=(datetime.strptime(pay_date_str, '%Y-%m-%d').date()
-                              if pay_date_str else None),
-                    declaration_date=(datetime.strptime(dec_date_str, '%Y-%m-%d').date()
-                                      if dec_date_str else None),
-                    record_date=(datetime.strptime(rec_date_str, '%Y-%m-%d').date()
-                                 if rec_date_str else None),
-                    amount=amount,
-                    currency=div.get('currency') or currency,
-                    frequency=div.get('frequency'),
-                    dividend_type=dividend_type,
-                    source='ib',
-                ))
-            except (ValueError, TypeError) as e:
-                logger.warning(f"Skipping malformed dividend element: {e}")
-                continue
-
+        logger.info(f"Derived {len(records)} IB dividend records for {ticker}")
         return records
 
 
@@ -695,8 +716,7 @@ class IBDividendsFetcher:
 # ============================================================
 def get_dividends(
     ticker: str,
-    db_config: dict,
-    user_agent: str,
+    db_config: Optional[dict],
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     exchange: str = 'SMART',
@@ -704,121 +724,57 @@ def get_dividends(
     ib_host: str = '127.0.0.1',
     ib_port: int = 4001,
     save_to_db: bool = True,
-    try_ib_fallback: bool = True,
 ) -> tuple[list[DividendRecord], str]:
-    """
-    Top-level dispatcher for dividend data.
+    """Fetch dividend history for ``ticker`` from IB and optionally store it.
 
-    Routing:
-      1. Resolve ticker to CIK via EDGAR's company tickers list.
-      2. If CIK found: try EDGAR.
-      3. If EDGAR returns empty and `try_ib_fallback=True`: try IB.
-      4. If no CIK: skip EDGAR, go straight to IB.
+    IB-derived history (``source='ib_adjusted'``) is the only stored source.
+    EDGAR's per-share facts are fiscal-period totals, not payments, so
+    ``EdgarDividendsFetcher`` is kept for cross-checks only and never routed to.
 
-    On any successful fetch (records > 0) and `save_to_db=True`:
-      - Write records to the dividends table.
-      - Add the ticker to the 'dividends' watchlist if not already there.
-      - Log to fetch_log.
+    On ``save_to_db=True`` the derived rows replace earlier ``ib_adjusted``
+    rows in the same date window, the ticker joins the 'dividends' watchlist
+    when it has records, and the fetch is logged to ``fetch_log``.
 
-    Returns
-    -------
-    (records, source_used): the records and the actual source string
-        ('edgar', 'ib', 'ib_fallback', or 'none').
+    Returns:
+        ``(records, 'ib_adjusted')``.
+
+    Raises:
+        RuntimeError: from ``IBDividendsFetcher.get_dividends`` when IB has
+            no data for the ticker.
     """
     ticker = ticker.upper()
     fetch_start = datetime.now()
 
-    # Open a long-lived DB connection for this fetch
-    conn = psycopg2.connect(**db_config) if save_to_db else None
+    with IBDividendsFetcher(host=ib_host, port=ib_port) as ib:
+        records = ib.get_dividends(
+            ticker, start_date=start_date, end_date=end_date,
+            exchange=exchange, currency=currency,
+        )
 
-    try:
-        # ── Step 1: try EDGAR if CIK exists ──────────────────────
-        records: list[DividendRecord] = []
-        source_used = 'none'
-
-        edgar_attempted = False
-        with EdgarDividendsFetcher(db_config=db_config,
-                                   user_agent=user_agent) as edgar:
-            info = edgar.resolve_ticker(ticker)
-            if info:
-                edgar_attempted = True
-                logger.info(
-                    f"Routing {ticker} to EDGAR (CIK {info['cik']}, "
-                    f"{info['name']})"
-                )
-                records = edgar.get_dividends(
-                    ticker, start_date=start_date, end_date=end_date
-                )
-                if records:
-                    source_used = 'edgar'
-
-            edgar.close()
-
-        # ── Step 2: IB fallback ──────────────────────────────────
-        if not records and (not edgar_attempted or try_ib_fallback):
-            reason = "no CIK found" if not edgar_attempted else "EDGAR empty"
-            logger.info(f"Routing {ticker} to IB ({reason})")
-            try:
-                with IBDividendsFetcher(
-                    host=ib_host, port=ib_port, db_config=db_config
-                ) as ib:
-                    records = ib.get_dividends(
-                        ticker,
-                        start_date=start_date,
-                        end_date=end_date,
-                        exchange=exchange,
-                        currency=currency,
-                    )
-                if records:
-                    source_used = 'ib_fallback' if edgar_attempted else 'ib'
-            except Exception as e:
-                logger.error(f"IB fallback failed for {ticker}: {e}")
-
-        # ── Step 3: persist if we have records ───────────────────
-        if save_to_db and records and conn is not None:
+    if save_to_db:
+        conn = psycopg2.connect(**db_config)
+        try:
             stock_id = _get_or_create_stock(conn, ticker, exchange, currency)
-            if stock_id:
-                _save_dividends_to_db(conn, stock_id, records)
+            if records:
+                _replace_derived_dividends(conn, stock_id, records)
                 _add_to_dividends_watchlist(conn, stock_id)
-                _log_fetch(
-                    conn, stock_id, fetch_start, datetime.now(),
-                    len(records), 'success'
-                )
-        elif save_to_db and not records and conn is not None:
-            stock_id = _get_or_create_stock(conn, ticker, exchange, currency)
-            if stock_id:
-                _log_fetch(
-                    conn, stock_id, fetch_start, datetime.now(),
-                    0, 'empty', 'No dividend data from any source'
-                )
-
-        return records, source_used
-
-    finally:
-        if conn is not None and not conn.closed:
+                _log_fetch(conn, stock_id, fetch_start, datetime.now(),
+                           len(records), 'success')
+            else:
+                _log_fetch(conn, stock_id, fetch_start, datetime.now(),
+                           0, 'empty', 'No dividends in IB adjusted prices')
+        finally:
             conn.close()
+
+    return records, 'ib_adjusted'
 
 
 # ============================================================
 # Example usage
 # ============================================================
 if __name__ == "__main__":
-    import os
-    from dotenv import load_dotenv
-    from db_config import get_db_config
-
-    load_dotenv()
-    user_agent = os.getenv('email')
-    db_config = get_db_config()
-
-    records, source = get_dividends(
-        ticker='PFE',
-        db_config=db_config,
-        user_agent=user_agent,
-        start_date='2018-01-01',
-        end_date='2024-12-31',
-    )
-
-    print(f"\nFetched {len(records)} dividend records via {source}")
-    for r in records[:10]:
-        print(f"  {r.ex_date}  {r.amount}  {r.dividend_type}  ({r.source})")
+    records, source = get_dividends('PFE', db_config=None,
+                                    start_date='2023-01-01', save_to_db=False)
+    print(f"\nDerived {len(records)} dividend records via {source}")
+    for r in records:
+        print(f"  {r.ex_date}  {r.amount}  {r.frequency}  {r.dividend_type}")
