@@ -32,6 +32,12 @@ dividends from **SEC EDGAR** (free XBRL API), stores everything in **PostgreSQL*
 
 ## Environment & running
 
+**Location:** the local checkout is `~/dev/rosmerta_neo` (it moved up from
+`~/dev/rosmerta_neo/rosmerta_prod` on 2026-11-18); the GitHub repo is `bgraham1996/rosmerta`. A zsh
+alias, `rosmerta`, runs `~/dev/rosmerta_neo/.venv/bin/python ~/dev/rosmerta_neo/main.py`. The
+`.venv` has absolute paths baked into its scripts, so if the checkout moves again, rebuild it
+(`uv sync` on a fresh `.venv`) and update the alias.
+
 Python 3.13+ (`.python-version`). Run everything through uv from this directory:
 
 ```bash

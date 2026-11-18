@@ -56,4 +56,5 @@ Consolidate after two big feature cycles (futures + bar size) before building mo
 ## Also landed this cycle (outside the plan):
 - PR #16 (`12d6f06`): forward-looking indicators `max_forward_gain` / `max_forward_drawdown` / `bars_to_target` + `docs/indicators.md`, salvaged from an uncommitted worktree. Advances [[Docs for using indicators]].
 - Git cleanup: every stale worktree/branch removed; repo is down to `main`.
-- Test suite: 135 → **143** passing.
+- Test suite: 135 → **195** passing (2026-11-18).
+- 2026-11-18: checkout moved up from `~/dev/rosmerta_neo/rosmerta_prod` to `~/dev/rosmerta_neo`; `.venv` rebuilt, `rosmerta` zsh alias, Claude memory and the dev/home `CLAUDE.md` files updated.
