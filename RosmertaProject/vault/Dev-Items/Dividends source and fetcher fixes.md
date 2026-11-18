@@ -1,13 +1,13 @@
 ---
 FileType: 🚥 Dev Item
 Type: Tech-Debt
-Status: In Progress
+Status: Done
 Priority: 🔴
 Bucket: data-quality
 Cycle: "3"
 DependsOn: 
 StartDate: 2026-11-18
-EndDate:
+EndDate: 2026-11-18
 tags:
 ---
 > [!success] **Source chosen 2026-11-18 (user decision): IB only.** A re-probe with the gateway up found a 4th option: IB's daily `ADJUSTED_LAST` bars divided by `TRADES` bars step up on each ex-date, and the step gives the cash amount. Checked on PFE, KO, MRK, ABBV, AAPL, NVO, O, BNTX and AMZN over 10 years: ex-dates match, amounts within ±$0.0001, splits don't trip it, non-payers give nothing. Limits: no pay/record/declaration dates, specials flagged by a size heuristic only, and pre-split/spin-off amounts are in today's share terms. Fundamentals are still refused (10358); tick 456 works on delayed data (next ex-date + amount) but isn't used yet. Free APIs (Massive, Tiingo, …) and Databento were compared and set aside for now.
@@ -30,9 +30,11 @@ The EDGAR dividends path records the wrong thing. For each 10-Q/10-K it stores t
 - [x] **Bug:** symbol+exchange lookup: already fixed by PR #21.
 - [x] Re-fetches replace the ticker's earlier `ib_adjusted` rows in the window (amounts can move by $0.0001, and `uq_dividend` includes `amount`).
 - [x] Unit tests (`tests/test_dividends_ib_adjusted.py`, 14 tests).
-- [ ] Merge the PR.
-- [ ] Remove the 56 PFE `source='edgar'` pilot rows from prod (confirm first), then `bulk dividends --list core`. Check PFE 2025 = 4 × $0.43.
-- [ ] Later: tick 456 for the next announced ex-date; Flex Cash Transactions for dividends received (portfolio Decision 6).
+- [x] Merge the PR → #33 `9885b6a` (2026-11-18).
+- [x] Removed the 56 PFE `source='edgar'` rows (backup `db_exports/dividends_pfe_edgar_backup_2026-11-18.csv`), then `bulk dividends --list core` → 2,677 `ib_adjusted` rows for 82 of 97 `core` stocks (2016-11-22 → 2026-11-16); the other 15 pay no dividend. PFE 2025 = 4 × $0.43, KO 2025 = $2.04.
+- [x] Special flag: compare each payment with its neighbours, not the 10-year median (the first rule flagged IBKR/NVDA dividend growth and SQM's variable payouts). Now flagged: COST ×3, F 2023, SMG 2020, TECK ×4, VST 2016.
+
+Follow-ups (not in scope): tick 456 for the next announced ex-date; Flex Cash Transactions for dividends received (portfolio Decision 6).
 
 # Dependencies
 ##### Depends on
